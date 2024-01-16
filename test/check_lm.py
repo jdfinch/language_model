@@ -30,6 +30,6 @@ tests = [
 ]
 
 if __name__ == '__main__':
-    for model in models:
+    for model, _ in models:
         for test in tests:
             sp.run(['python', str(test), model])

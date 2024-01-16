@@ -9,7 +9,7 @@ Model = models[model_name]
 
 
 with ez.check("Finetune capital languages"):
-    model = Model()
+    model = Model(num_beams=2, max_output_length=128)
     print('Perplexity:', model.perplexity(data_capital_langs.items()))
     for ppl in model.training(data_capital_langs.items()):
         print("Perplexity:", ppl)

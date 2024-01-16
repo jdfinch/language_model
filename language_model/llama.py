@@ -16,9 +16,10 @@ from bitsandbytes.optim import AdamW8bit
 from peft import LoraConfig
 
 from accelerate import Accelerator
-import dataclasses as dc
 from tqdm import tqdm
 import ezpyzy as ez
+from dataclasses import dataclass as settings
+vars().update(settings=ez.settings)
 import pathlib as pl
 import shutil
 import os
@@ -46,8 +47,7 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
     merged.save_pretrained(merged_path, safe_serialization=False, save_peft_format=False)
     return merged_path
 
-
-@dc.dataclass
+@settings
 class LlamaArgs:
     base: str = "meta-llama/Llama-2-{param_magnitude}-chat-hf"
     param_magnitude: str = '7b'
@@ -86,13 +86,21 @@ class LlamaArgs:
     top_k: int = 50
     gen_batch_size: int = None
     experiment: str = None
+    training_data: str|tuple[list[str], list[str]]|list[tuple[str, str]] = None
 
-@dc.dataclass
+
+@settings
 class Llama(LlamaArgs):
 
     def __post_init__(self):
+        if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
+            loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json').load()
+            specified_hyperparameters = vars(self).pop('specified')
+            hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
+            vars(self).update(hyperparameters)
         if '{param_magnitude}' in self.base:
             self.base = self.base.replace('{param_magnitude}', str(self.param_magnitude))
+        self.hyperparameters: dict = dict(vars(self))
         tokenizer_reponame = "meta-llama/Llama-2-7b-chat-hf"
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True)
         self.tokenizer.return_special_tokens_mask = True
@@ -149,6 +157,11 @@ class Llama(LlamaArgs):
                 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'
             ]
         self.model.eval()
+        self.training_data: list[tuple[str, str]] = []
+        if not isinstance(self.training_data, (tuple, list)):
+            self.training_data = ez.File(self.training_data).load() # noqa
+        if isinstance(self.training_data, tuple):
+            self.training_data = list(zip(*self.training_data))
 
     @property
     def actual_train_batch_size(self):
@@ -157,6 +170,7 @@ class Llama(LlamaArgs):
     def save(self, path:ez.filelike):
         path = ez.File(path).path
         self.model.save_pretrained(path)
+        ez.File(path/'hyperparameters.json').save(self.hyperparameters)
 
     def save_checkpoint(self, path: ez.filelike = None):
         if path is None:
@@ -223,6 +237,8 @@ class Llama(LlamaArgs):
 
     def training(self, inputs=None, outputs=None, yield_every_x_epochs=1):
         if outputs is None:
+            if inputs is None:
+                inputs = self.training_data
             try:
                 inputs, outputs = zip(*inputs)
             except ValueError:
