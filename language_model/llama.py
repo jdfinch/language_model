@@ -23,8 +23,7 @@ import pathlib as pl
 import shutil
 import os
 import math
-with ez.shush():
-    from optimum.bettertransformer import BetterTransformer
+
 
 os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'
 
@@ -87,7 +86,6 @@ class LlamaArgs:
     top_k: int = 50
     gen_batch_size: int = None
     experiment: str = None
-    optimized_inference_only: bool = False
 
 @dc.dataclass
 class Llama(LlamaArgs):
@@ -151,8 +149,6 @@ class Llama(LlamaArgs):
                 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'
             ]
         self.model.eval()
-        if self.optimized_inference_only:
-            self.model = BetterTransformer.transform(self.model)
 
     @property
     def actual_train_batch_size(self):
@@ -377,8 +373,7 @@ def main():
     with ez.check("Load LoRA"):
         model = Model(
             f'ex/test/{model_name}/lora_capital_langs',
-            lora_merge_on_load=False,
-            optimized_inference_only=True
+            lora_merge_on_load=False
         )
         print('Perplexity:', model.perplexity(data_capital_langs.items()))
         eval(

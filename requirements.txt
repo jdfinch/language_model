@@ -10,7 +10,6 @@ peft==0.6.0
 bitsandbytes==0.41.1
 trl==0.7.2
 datasets==2.14.6
-optimum
 scipy
 
 fire

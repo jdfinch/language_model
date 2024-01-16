@@ -10,8 +10,7 @@ Model = models[model_name]
 
 model = Model(
     f'ex/test/{model_name}/lora_capital_langs',
-    lora_merge_on_load=True,
-    optimized_inference_only=True
+    lora_merge_on_load=True
 )
 
 with ez.check("Load LoRA for capital languages"):
