@@ -18,8 +18,7 @@ from peft import LoraConfig
 from accelerate import Accelerator
 from tqdm import tqdm
 import ezpyzy as ez
-from dataclasses import dataclass as settings
-vars().update(settings=ez.settings)
+from dataclasses import dataclass as settings; vars().update(settings=ez.settings)
 import pathlib as pl
 import shutil
 import os
@@ -48,7 +47,7 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
     return merged_path
 
 @settings
-class LlamaArgs:
+class LlamaHyperparameters(ez.Settings):
     base: str = "meta-llama/Llama-2-{param_magnitude}-chat-hf"
     param_magnitude: str = '7b'
     format: str = '''[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>'''
@@ -90,12 +89,12 @@ class LlamaArgs:
 
 
 @settings
-class Llama(LlamaArgs):
+class Llama(LlamaHyperparameters):
 
     def __post_init__(self):
         if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
             loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json').load()
-            specified_hyperparameters = vars(self).pop('specified')
+            specified_hyperparameters = vars(self).pop('settings')
             hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
             vars(self).update(hyperparameters)
         if '{param_magnitude}' in self.base:
@@ -171,12 +170,14 @@ class Llama(LlamaArgs):
         path = ez.File(path).path
         self.model.save_pretrained(path)
         ez.File(path/'hyperparameters.json').save(self.hyperparameters)
+        return path
 
     def save_checkpoint(self, path: ez.filelike = None):
         if path is None:
             path = 'ex/scratch/checkpoint'
         path = ez.File(path).path
         self.acclerator.save_state(path)
+        return path
 
     def preprocess(self, inputs=None, outputs=None):
         if outputs is None:
@@ -374,7 +375,6 @@ class Llama(LlamaArgs):
             for gen, input_len in zip(encoded_gens, input_lens):
                 generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=True)
                 decoded_gens.append(generated)
-
             return decoded_gens[0] if single else decoded_gens
 
 
