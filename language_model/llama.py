@@ -56,7 +56,6 @@ class LlamaHyperparameters(ez.Settings):
     checkpoint: str | None = None
     checkpoint_after_every_x_epochs: float | None = 1.0
     checkpoint_clean_up_after_train: bool = True
-    data: str = None
     epoch: int = 0
     step: int = 0
     epochs: int = 1
@@ -84,8 +83,6 @@ class LlamaHyperparameters(ez.Settings):
     top_p: float = 0.9
     top_k: int = 50
     gen_batch_size: int = None
-    experiment: str = None
-    training_data: str|tuple[list[str], list[str]]|list[tuple[str, str]] = None
 
 
 @settings
@@ -156,11 +153,6 @@ class Llama(LlamaHyperparameters):
                 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'
             ]
         self.model.eval()
-        self.training_data: list[tuple[str, str]] = []
-        if not isinstance(self.training_data, (tuple, list)):
-            self.training_data = ez.File(self.training_data).load() # noqa
-        if isinstance(self.training_data, tuple):
-            self.training_data = list(zip(*self.training_data))
 
     @property
     def actual_train_batch_size(self):
@@ -238,8 +230,6 @@ class Llama(LlamaHyperparameters):
 
     def training(self, inputs=None, outputs=None, yield_every_x_epochs=1):
         if outputs is None:
-            if inputs is None:
-                inputs = self.training_data
             try:
                 inputs, outputs = zip(*inputs)
             except ValueError:
