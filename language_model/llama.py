@@ -48,54 +48,59 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
 
 @settings
 class LlamaHyperparameters(ez.Settings):
-    base: str = "meta-llama/Llama-2-{param_magnitude}-chat-hf"
-    param_magnitude: str = '7b'
-    format: str = '''[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>'''
-    train_on_s2s_inputs: bool = False
-    quantize: str | None = 'nf4'
-    checkpoint: str | None = None
-    checkpoint_after_every_x_epochs: float | None = 1.0
-    checkpoint_clean_up_after_train: bool = True
-    epoch: int = 0
-    step: int = 0
-    epochs: int = 1
-    max_sequence_length: int = 4096
-    protected_input_length: int = 512
-    train_batch_size: int = 1
-    gradient_accumulation_steps: int = 1
-    optimizer: str = 'adamw_bnb_8bit'
-    learning_rate: float = 2e-4
-    weight_decay: float = 0.001
-    max_gradient_norm: float = 0.3
-    warmup_steps: int = 0
-    lr_scheduler_type: str = 'constant'
-    lora: int | None = 8
-    lora_alpha: int | None = None
-    lora_dropout: float | None = 0.1
-    lora_modules: list[str] = None
-    lora_merge_on_load: bool = True
-    gradient_checkpointing: bool = True
-    max_output_length: int = 512
-    repetition_penalty: float = 1.2
-    num_beams: int = 1
-    temperature: float = 0.6
-    sampled_generation: bool = False
-    top_p: float = 0.9
-    top_k: int = 50
-    gen_batch_size: int = None
+    base: ez.ColStr = ez.Def("meta-llama/Llama-2-{param_magnitude}-chat-hf")
+    param_magnitude: ez.ColStr = ez.Def('7b')
+    format: ez.ColStr = ez.Def('''[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>''')
+    train_on_s2s_inputs: ez.ColBool = ez.Def(False)
+    quantize: ez.ColStr = ez.Def('nf4')
+    checkpoint: ez.ColStr = None
+    checkpoint_after_every_x_epochs: ez.ColFloat = ez.Def(1.0)
+    checkpoint_clean_up_after_train: ez.ColBool = ez.Def(True)
+    epoch: ez.ColInt = ez.Def(0)
+    step: ez.ColInt = ez.Def(0)
+    epochs: ez.ColInt = ez.Def(1)
+    max_sequence_length: ez.ColInt = ez.Def(4096)
+    protected_input_length: ez.ColInt = ez.Def(512)
+    train_batch_size: ez.ColInt = ez.Def(1)
+    gradient_accumulation_steps: ez.ColInt = ez.Def(1)
+    optimizer: ez.ColStr = ez.Def('adamw_bnb_8bit')
+    learning_rate: ez.ColFloat = ez.Def(2e-4)
+    weight_decay: ez.ColFloat = ez.Def(0.001)
+    max_gradient_norm: ez.ColFloat = ez.Def(0.3)
+    warmup_steps: ez.ColInt = ez.Def(0)
+    lr_scheduler_type: ez.ColStr = ez.Def('constant')
+    lora: ez.ColInt = ez.Def(8)
+    lora_alpha: ez.ColInt = None
+    lora_dropout: ez.ColFloat = ez.Def(0.1)
+    lora_modules: ez.Column[list[str]]|list[str]|None = None
+    lora_merge_on_load: ez.ColBool = ez.Def(True)
+    gradient_checkpointing: ez.ColBool = ez.Def(True)
+    max_output_length: ez.ColInt = ez.Def(512)
+    repetition_penalty: ez.ColFloat = ez.Def(1.2)
+    num_beams: ez.ColInt = ez.Def(1)
+    temperature: ez.ColFloat = ez.Def(0.6)
+    sampled_generation: ez.ColBool = ez.Def(False)
+    top_p: ez.ColFloat = ez.Def(0.9)
+    top_k: ez.ColInt = ez.Def(50)
+    gen_batch_size: ez.ColInt = None
+
+    def actual_train_batch_size(self):
+        return self.train_batch_size // self.gradient_accumulation_steps
+
+    def __post_init__(self):
+        if '{param_magnitude}' in self.base:
+            self.base = self.base.replace('{param_magnitude}', str(self.param_magnitude))
 
 
-@settings
 class Llama(LlamaHyperparameters):
 
     def __post_init__(self):
+        LlamaHyperparameters.__post_init__(self)
         if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
             loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json').load()
             specified_hyperparameters = vars(self).pop('settings')
             hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
             vars(self).update(hyperparameters)
-        if '{param_magnitude}' in self.base:
-            self.base = self.base.replace('{param_magnitude}', str(self.param_magnitude))
         self.hyperparameters: dict = dict(vars(self))
         tokenizer_reponame = "meta-llama/Llama-2-7b-chat-hf"
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True)
@@ -145,7 +150,7 @@ class Llama(LlamaHyperparameters):
         self.acclerator = Accelerator(gradient_accumulation_steps=self.gradient_accumulation_steps)
         assert self.train_batch_size % self.gradient_accumulation_steps == 0
         if self.gen_batch_size is None:
-            self.gen_batch_size = self.actual_train_batch_size
+            self.gen_batch_size = self.actual_train_batch_size()
         if self.lora is not None and self.lora_alpha is None:
             self.lora_alpha = self.lora * 2  # heuristic usually works well
         if self.lora_modules is None:
@@ -153,10 +158,6 @@ class Llama(LlamaHyperparameters):
                 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'
             ]
         self.model.eval()
-
-    @property
-    def actual_train_batch_size(self):
-        return self.train_batch_size // self.gradient_accumulation_steps
 
     def save(self, path:ez.filelike):
         path = ez.File(path).path
@@ -253,7 +254,7 @@ class Llama(LlamaHyperparameters):
             tokenizer=self.tokenizer, return_tensors='pt', pad_to_multiple_of=8
         )
         dataloader = DataLoader(
-            dataset, batch_size=self.actual_train_batch_size, collate_fn=collator, shuffle=True
+            dataset, batch_size=self.actual_train_batch_size(), collate_fn=collator, shuffle=True
         )
         optimizer = AdamW8bit(
             self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
@@ -314,7 +315,7 @@ class Llama(LlamaHyperparameters):
             tokenizer=self.tokenizer, return_tensors='pt', pad_to_multiple_of=8
         )
         dataloader = DataLoader(
-            dataset, batch_size=self.actual_train_batch_size, collate_fn=collator, shuffle=True
+            dataset, batch_size=self.actual_train_batch_size(), collate_fn=collator, shuffle=True
         )
         dataloader, model = self.acclerator.prepare(dataloader, self.model)  # noqa
         display = tqdm(total=self.epochs * len(dataloader), desc='Calculating Perplexity')

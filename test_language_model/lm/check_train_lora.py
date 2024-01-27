@@ -1,7 +1,7 @@
 
 import ezpyzy as ez
 
-from test.check_lm import models, eval, data_capital_langs
+from test_language_model.check_lm import models, eval, data_capital_langs
 import sys
 
 model_name = sys.argv[1] if len(sys.argv) > 1 else 'Llama'
