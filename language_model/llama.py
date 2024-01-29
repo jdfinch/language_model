@@ -191,7 +191,7 @@ class Llama(LlamaHyperparameters):
                 if overflow > 0:
                     input_overflow = min(overflow, max(0, len(input_ids) - self.protected_input_length))
                     input_ids = input_ids[input_overflow:]
-                    output_ids = output_ids[:self.max_sequence_length - len(input_ids)]
+                    output_ids = output_ids[:max(0, self.max_sequence_length - len(input_ids))]
                 if self.train_on_s2s_inputs:
                     labels = input_ids + output_ids
                 else:
@@ -266,7 +266,7 @@ class Llama(LlamaHyperparameters):
         if self.checkpoint:
             self.acclerator.load_state(self.checkpoint)
             self.checkpoint = None
-        display = tqdm(total=self.epochs * len(dataset), desc='Training')
+        display = tqdm(total=self.epochs * len(dataset), desc='Training', position=0, leave=True)
         epoch_checkpoint_progress = 0.0
         epoch_yield_progress = 0.0
         for self.epoch in range(self.epochs):
@@ -318,7 +318,7 @@ class Llama(LlamaHyperparameters):
             dataset, batch_size=self.actual_train_batch_size(), collate_fn=collator, shuffle=True
         )
         dataloader, model = self.acclerator.prepare(dataloader, self.model)  # noqa
-        display = tqdm(total=self.epochs * len(dataloader), desc='Calculating Perplexity')
+        display = tqdm(total=len(dataloader), desc='Calculating Perplexity', position=0)
         nlls = []
         for step, batch in enumerate(dataloader):
             loss = model(**batch).loss
@@ -356,17 +356,23 @@ class Llama(LlamaHyperparameters):
             )
             input_lens = [len(case['input_ids']) for case in dataset]
             encoded_gens = []
-            for step, batch in enumerate(dataloader):
-                batch = {k: v.to('cuda') for k, v in batch.items()}
+        display = tqdm(total=len(dataloader), desc='Generating', position=0)
+        for step, batch in enumerate(dataloader):
+            with ez.shush():
+                batch_dict = {k: v.to('cuda') for k, v in batch.items()}
                 gen = self.model.generate(
-                    **batch, generation_config=config, pad_token_id=self.tokenizer.eos_token_id
+                    **batch_dict,
+                    generation_config=config,
+                    pad_token_id=self.tokenizer.eos_token_id
                 )
                 encoded_gens.extend(gen)
+            display.update(len(batch.data['input_ids']))
+        with ez.shush():
             decoded_gens = []
             for gen, input_len in zip(encoded_gens, input_lens):
                 generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=True)
                 decoded_gens.append(generated)
-            return decoded_gens[0] if single else decoded_gens
+        return decoded_gens[0] if single else decoded_gens
 
 
 def main():
