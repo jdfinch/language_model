@@ -1,3 +1,5 @@
+import dataclasses
+
 import peft
 import torch
 from torch.utils.data import DataLoader
@@ -83,6 +85,7 @@ class LlamaHyperparameters(ez.Settings):
     top_p: ez.ColFloat = ez.Def(0.9)
     top_k: ez.ColInt = ez.Def(50)
     gen_batch_size: ez.ColInt = None
+    dynamic_tokenization: ez.ColBool = ez.Def(True)
 
     def actual_train_batch_size(self):
         return self.train_batch_size // self.gradient_accumulation_steps
@@ -226,18 +229,38 @@ class Llama(LlamaHyperparameters):
                 case['attention_mask'] = case['attention_mask'][truncation:]
                 if 'labels' in case:
                     case['labels'] = case['labels'][truncation:]
-        dataset = Dataset.from_list(datalist)
-        return dataset
+        return datalist
+
+    def _set_up_dataloader(self, inputs, outputs, batch_size=1, shuffle=False):
+        if not self.dynamic_tokenization:
+            dataset = Dataset.from_list(self.preprocess(inputs, outputs))
+            collator = DataCollatorForSeq2Seq(
+                tokenizer=self.tokenizer,
+                return_tensors='pt',
+                pad_to_multiple_of=8
+            )
+        else:
+            if outputs is None:
+                if isinstance(next(iter(inputs)), str):
+                    outputs = [None] * len(inputs)
+                else:
+                    inputs, outputs = list(zip(*inputs))
+            datalist = [{'input': input, 'output': output} for input, output in zip(inputs, outputs)]
+            dataset = Dataset.from_list(datalist)
+            collator = DynamicDataCollator(
+                tokenizer=self.tokenizer,
+                model=self,
+                return_tensors='pt',
+                pad_to_multiple_of=8
+            )
+        dataloader = DataLoader(
+            dataset, batch_size=batch_size, collate_fn=collator, shuffle=shuffle
+        )
+        return dataloader
 
     def training(self, inputs=None, outputs=None, yield_every_x_epochs=1):
-        if outputs is None:
-            try:
-                inputs, outputs = zip(*inputs)
-            except ValueError:
-                inputs, outputs = outputs, inputs
-        dataset = self.preprocess(inputs, outputs)
         if self.lora is not None:
-            if self.lora_merge_on_load:
+            if self.lora_merge_on_load: # if lora is merged, we can set up another lora for subsequent training; however, if lora is not merged, we want to further tune the original
                 peft_parameters = LoraConfig(
                     lora_alpha=self.lora_alpha,
                     lora_dropout=self.lora_dropout,
@@ -250,11 +273,8 @@ class Llama(LlamaHyperparameters):
                 self.model = peft.get_peft_model(self.model, peft_parameters) # noqa
                 self.model.base_model.model.enable_input_require_grads()
         self.model.train()
-        collator = DataCollatorForSeq2Seq(
-            tokenizer=self.tokenizer, return_tensors='pt', pad_to_multiple_of=8
-        )
-        dataloader = DataLoader(
-            dataset, batch_size=self.actual_train_batch_size(), collate_fn=collator, shuffle=True
+        dataloader = self._set_up_dataloader(
+            inputs, outputs, self.actual_train_batch_size(), shuffle=True
         )
         optimizer = AdamW8bit(
             self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
@@ -266,7 +286,7 @@ class Llama(LlamaHyperparameters):
         if self.checkpoint:
             self.acclerator.load_state(self.checkpoint)
             self.checkpoint = None
-        display = tqdm(total=self.epochs * len(dataset), desc='Training', position=0, leave=True)
+        display = tqdm(total=self.epochs * len(inputs), desc='Training', position=0, leave=True)
         epoch_checkpoint_progress = 0.0
         epoch_yield_progress = 0.0
         for self.epoch in range(self.epochs):
@@ -305,20 +325,13 @@ class Llama(LlamaHyperparameters):
         return list(self.training(inputs=inputs, outputs=outputs))
 
     def perplexity(self, inputs, outputs=None):
-        if outputs is None:
-            if inputs and not isinstance(next(iter(inputs)), str):
-                inputs, outputs = zip(*inputs)
-            elif not inputs:
-                inputs, outputs = outputs, inputs
-        dataset = self.preprocess(inputs, outputs)
-        collator = DataCollatorForSeq2Seq(
-            tokenizer=self.tokenizer, return_tensors='pt', pad_to_multiple_of=8
-        )
-        dataloader = DataLoader(
-            dataset, batch_size=self.actual_train_batch_size(), collate_fn=collator, shuffle=True
-        )
+        if inputs is None and outputs is not None:
+            num_items = len(outputs)
+        else:
+            num_items = len(inputs)
+        dataloader = self._set_up_dataloader(inputs, outputs, self.actual_train_batch_size())
         dataloader, model = self.acclerator.prepare(dataloader, self.model)  # noqa
-        display = tqdm(total=len(dataloader), desc='Calculating Perplexity', position=0)
+        display = tqdm(total=num_items, desc='Calculating Perplexity', position=0)
         nlls = []
         for step, batch in enumerate(dataloader):
             loss = model(**batch).loss
@@ -332,18 +345,12 @@ class Llama(LlamaHyperparameters):
         return ppl
 
     def generate(self, prompt):
+        single = False
+        if isinstance(prompt, str):
+            prompt = [prompt]
+            single = True
         with ez.shush():
-            single = False
-            if isinstance(prompt, str):
-                prompt = [prompt]
-                single = True
-            dataset = self.preprocess(inputs=prompt)
-            collator = DataCollatorForSeq2Seq(
-                tokenizer=self.tokenizer, return_tensors='pt', pad_to_multiple_of=8
-            )
-            dataloader = DataLoader(
-                dataset, batch_size=self.gen_batch_size, collate_fn=collator, shuffle=False
-            )
+            dataloader = self._set_up_dataloader(prompt, None, batch_size=self.gen_batch_size)
             config = GenerationConfig(
                 repetition_penalty=self.repetition_penalty,
                 max_new_tokens=self.max_output_length,
@@ -354,10 +361,11 @@ class Llama(LlamaHyperparameters):
                 top_k=self.top_k,
                 eos_token_id=2
             )
-            input_lens = [len(case['input_ids']) for case in dataset]
-            encoded_gens = []
+        encoded_gens = []
+        input_lens = []
         display = tqdm(total=len(dataloader), desc='Generating', position=0)
         for step, batch in enumerate(dataloader):
+            input_lens.extend(len(x) for x in batch.data['input_ids'])
             with ez.shush():
                 batch_dict = {k: v.to('cuda') for k, v in batch.items()}
                 gen = self.model.generate(
@@ -365,7 +373,7 @@ class Llama(LlamaHyperparameters):
                     generation_config=config,
                     pad_token_id=self.tokenizer.eos_token_id
                 )
-                encoded_gens.extend(gen)
+            encoded_gens.extend(gen)
             display.update(len(batch.data['input_ids']))
         with ez.shush():
             decoded_gens = []
@@ -373,6 +381,28 @@ class Llama(LlamaHyperparameters):
                 generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=True)
                 decoded_gens.append(generated)
         return decoded_gens[0] if single else decoded_gens
+
+
+class DynamicDataCollator:
+
+    def __init__(self, tokenizer, model, return_tensors, pad_to_multiple_of):
+        self.seq2seq_collator = DataCollatorForSeq2Seq(
+            tokenizer=tokenizer,
+            return_tensors=return_tensors,
+            pad_to_multiple_of=pad_to_multiple_of
+        )
+        self.model = model
+
+    def __call__(self, datapoints):
+        inputs = [d['input'] for d in datapoints]
+        outputs = [d['output'] for d in datapoints]
+        if all(output is None for output in outputs):
+            outputs = None
+        if all(input is None for input in inputs):
+            inputs = None
+        preprocessed = self.model.preprocess(inputs, outputs)
+        return self.seq2seq_collator(preprocessed)
+
 
 
 def main():
