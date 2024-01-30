@@ -103,3 +103,4 @@ virtualenv==20.25.0
 xxhash==3.4.1
 yarl==1.9.4
 zipp==3.17.0
+ezpyzy==0.2.0
