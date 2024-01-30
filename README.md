@@ -99,15 +99,25 @@ ppl = llama.perplexity(data)
 
 Important default settings:
 
-* 7 billion parameter chat variant of Llama2. This can be changed using the `base` and/or `param_magnitude` params to specify a different base model.
-* `nf4` quantization (`quantize` parameter can be set to `'nf4', 'int8', 'fp16', None`), which is fast and memory efficient but may sacrifice accuracy.
-* Low Rank Adaptation (LoRA) specified as `lora=8`, but can be set to `None` to disable LoRA and make all parameters trainable.
-  * By default LoRA applied to these modules: `['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']`
-* `train_batch_size=1` and `gen_batch_size=1`, with `gradient_accumulation_steps=1`. Increase batch size to speed up at the cost of higher memory utilization.
-* `max_sequence_length=4096` which is what Llama can handle, but is usually too large, so consider reducing to trigger left-side input truncation. To protect a minimum amount of input from being truncated, the `protected_input_length` parameter (default `512`) can be used to prevent right-side input tokens from being truncated (the right-hand side of output tokens will be truncated instead during training).
-* `max_output_length=512`, but generating this amount is somewhat slow.
-* Training is sensitive to `learning_rate`, so consider adjusting for your training task.
-* Generation is sensitive to `repetition_penalty` and `num_beams` (increasing `num_beams` increases memory cost but may improve generation quality).
+The 7 billion parameter chat variant of Llama2 is the default base model. This can be changed using the `base` and/or `param_magnitude` params to specify a different base model.
+
+`nf4` quantization (`quantize` parameter can be set to `'nf4', 'int8', 'fp16', None`), which is fast and memory efficient but may sacrifice accuracy. 
+
+Input and output is wrapped by the format `"[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>"`. This format is expected by Llama2 and changing it can negatively affect the performance, but you can change it using the `format` parameter. 
+
+Low Rank Adaptation (LoRA) specified as `lora=8`, but can be set to `None` to disable LoRA and make all parameters trainable.
+
+By default LoRA applied to these modules: `['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']`
+
+`train_batch_size=1` and `gen_batch_size=1`, with `gradient_accumulation_steps=1`. Increase batch size to speed up at the cost of higher memory utilization.
+
+`max_sequence_length=4096` which is what Llama can handle, but is usually too large, so consider reducing to trigger left-side input truncation. To protect a minimum amount of input from being truncated, the `protected_input_length` parameter (default `512`) can be used to prevent right-side input tokens from being truncated (the right-hand side of output tokens will be truncated instead during training).
+
+`max_output_length=512`, but generating this amount is somewhat slow.
+
+Training is sensitive to `learning_rate`, so consider adjusting for your training task.
+
+Generation is sensitive to `repetition_penalty` and `num_beams` (increasing `num_beams` increases memory cost but may improve generation quality).
 
 
 
