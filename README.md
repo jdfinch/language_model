@@ -101,7 +101,7 @@ Important default settings:
 
 * 7 billion parameter chat variant of Llama2. This can be changed using the `base` and/or `param_magnitude` params to specify a different base model.
 * `nf4` quantization (`quantize` parameter can be set to `'nf4', 'int8', 'fp16', None`), which is fast and memory efficient but may sacrifice accuracy.
-* Low Rank Adaptation (LoRA) specified as `lora=8`, but can be set to `None` to make all parameters trainable.
+* Low Rank Adaptation (LoRA) specified as `lora=8`, but can be set to `None` to disable LoRA and make all parameters trainable.
   * By default LoRA applied to these modules: `['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']`
 * `train_batch_size=1` and `gen_batch_size=1`, with `gradient_accumulation_steps=1`. Increase batch size to speed up at the cost of higher memory utilization.
 * `max_sequence_length=4096` which is what Llama can handle, but is usually too large, so consider reducing to trigger left-side input truncation. To protect a minimum amount of input from being truncated, the `protected_input_length` parameter (default `512`) can be used to prevent right-side input tokens from being truncated (the right-hand side of output tokens will be truncated instead during training).
