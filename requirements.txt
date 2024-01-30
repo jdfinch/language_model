@@ -14,6 +14,6 @@ scipy
 
 fire
 openai
-
+ezpyzy==0.2.0
 
 pytest
