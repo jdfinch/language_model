@@ -363,7 +363,7 @@ class Llama(LlamaHyperparameters):
             )
         encoded_gens = []
         input_lens = []
-        display = tqdm(total=len(dataloader), desc='Generating', position=0)
+        display = tqdm(total=len(prompt), desc='Generating', position=0)
         for step, batch in enumerate(dataloader):
             input_lens.extend(len(x) for x in batch.data['input_ids'])
             with ez.shush():
@@ -406,27 +406,7 @@ class DynamicDataCollator:
 
 
 def main():
-    import ezpyzy as ez
-
-    from test.check_lm import models, eval, data_capital_langs
-
-    model_name = 'Llama'
-    Model = Llama
-
-    with ez.check("Load LoRA"):
-        model = Model(
-            f'ex/test/{model_name}/lora_capital_langs',
-            lora_merge_on_load=False
-        )
-        print('Perplexity:', model.perplexity(data_capital_langs.items()))
-        eval(
-            model, {
-                "Kyiv": "Ukrainian",
-                "London": "English",
-                "Washington D.C.": "English",
-                "Hanoi": "Vietnamese"
-            }.items()
-        )
+    pass
 
 
 if __name__ == '__main__':
