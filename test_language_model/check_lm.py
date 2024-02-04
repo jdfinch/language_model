@@ -1,3 +1,4 @@
+import test_language_model
 import ezpyzy as ez
 import inspect
 import subprocess as sp
@@ -8,8 +9,10 @@ with ez.CapturedVars() as models:
 
 alpha = lambda s: ''.join(c for c in s if c.isalpha() or c == ' ')
 
-data_item_colors = ez.File('test_language_model/item_colors.json').load()
-data_capital_langs = ez.File('test_language_model/capital_langs.json').load()
+root = pl.Path(test_language_model.__file__).parent
+
+data_item_colors = ez.File(root / 'item_colors.json').load()
+data_capital_langs = ez.File(root / 'capital_langs.json').load()
 
 def eval(model, tests, assertion=True):
     total_correct = 0
@@ -22,11 +25,10 @@ def eval(model, tests, assertion=True):
         total_correct += correct
     print()
 
-
 tests = [
-    'test_language_model/lm/check_pretrained_lm.py',
-    'test_language_model/lm/check_train_lora.py',
-    'test_language_model/lm/check_load_lora.py',
+    root / 'lm/check_pretrained_lm.py',
+    root / 'lm/check_train_lora.py',
+    root / 'lm/check_load_lora.py',
 ]
 
 if __name__ == '__main__':
