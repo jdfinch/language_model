@@ -336,7 +336,8 @@ class Llama(LlamaHyperparameters):
         for step, batch in enumerate(dataloader):
             loss = model(**batch).loss
             num_tokens = batch['labels'].ne(loss_mask).sum().item()
-            nlls.append((loss.item() * num_tokens, num_tokens))
+            if num_tokens > 0:
+                nlls.append((loss.item() * num_tokens, num_tokens))
             display.update(len(batch.data['input_ids']))
         total_nll = sum(nll for nll, _ in nlls)
         total_tokens = sum(num_tokens for _, num_tokens in nlls)
