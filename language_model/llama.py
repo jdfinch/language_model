@@ -85,8 +85,8 @@ class LlamaHyperparameters(ez.Settings):
     sampled_generation: ez.ColBool = ez.Def(False)
     top_p: ez.ColFloat = ez.Def(0.9)
     top_k: ez.ColInt = ez.Def(50)
-    gen_batch_size: ez.ColInt = None
-    ppl_batch_size: ez.ColInt = None
+    gen_batch_size: ez.ColInt = ez.Def(1)
+    ppl_batch_size: ez.ColInt = ez.Def(1)
     dynamic_tokenization: ez.ColBool = ez.Def(True)
 
     def actual_train_batch_size(self):
