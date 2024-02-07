@@ -119,7 +119,7 @@ class Llama(LlamaHyperparameters):
                     quantization_config=BitsAndBytesConfig(
                         load_in_4bit=True,
                         bnb_4bit_quant_type='nf4',
-                        bnb_4bit_compute_dtype=torch.float16,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
                         bnb_4bit_use_double_quant=False
                     ),
                     device_map='auto'
@@ -129,14 +129,14 @@ class Llama(LlamaHyperparameters):
                     load_in_8bit=True,
                     device_map='auto'
                 )
-            elif self.quantize == 'fp16':
+            elif self.quantize == 'bf16':
                 quant_kwargs = dict(
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16,
                     device_map='auto'
                 )
             else:
                 raise ValueError(f"Invalid quantization level: {self.quantize}.\n"
-                                 f"Supported quantizations are: 'nf4', 'int8', 'fp16', None")
+                                 f"Supported quantizations are: 'nf4', 'int8', 'bf16', None")
         load_path = pl.Path(self.base)
         delete_merge_path = None
         if load_path.exists() and (load_path/'adapter_config.json').exists() and self.lora_merge_on_load:
@@ -148,7 +148,7 @@ class Llama(LlamaHyperparameters):
             load_path = merged_path
         else:
             load_path = self.base
-        self.model = AutoModelForCausalLM.from_pretrained(load_path, **quant_kwargs)
+        self.model = AutoModelForCausalLM.from_pretrained(load_path, torch_dtype=torch.bfloat16, **quant_kwargs)
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
         self.model.resize_token_embeddings(len(self.tokenizer))
