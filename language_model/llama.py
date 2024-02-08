@@ -299,12 +299,16 @@ class Llama(LlamaHyperparameters):
                 epoch_yield_progress += len(batch['input_ids'])
                 with self.acclerator.accumulate(model):
                     loss = model(**batch).loss
-                    self.acclerator.backward(loss)
-                    optimizer.step()
-                    scheduler.step()
-                    optimizer.zero_grad()
-                num_tokens = batch['labels'].ne(loss_mask).sum().item()
-                nlls.append((loss.item() * num_tokens, num_tokens))
+                    if not math.isnan(loss.item()):
+                        self.acclerator.backward(loss)
+                        optimizer.step()
+                        scheduler.step()
+                        optimizer.zero_grad()
+                        num_tokens = batch['labels'].ne(loss_mask).sum().item()
+                        token_loss = loss.item() * num_tokens
+                        nlls.append((token_loss, num_tokens))
+                    else:
+                        print('Warning: NaN loss encountered')
                 display.update(len(batch['input_ids']))
                 if (
                     self.checkpoint_after_every_x_epochs and
@@ -335,9 +339,12 @@ class Llama(LlamaHyperparameters):
         nlls = []
         for step, batch in enumerate(dataloader):
             loss = model(**batch).loss
-            num_tokens = batch['labels'].ne(loss_mask).sum().item()
-            if num_tokens > 0:
-                nlls.append((loss.item() * num_tokens, num_tokens))
+            if not math.isnan(loss.item()):
+                num_tokens = batch['labels'].ne(loss_mask).sum().item()
+                token_loss = loss.item() * num_tokens
+                nlls.append((token_loss, num_tokens))
+            else:
+                print('Warning: NaN loss encountered')
             display.update(len(batch.data['input_ids']))
         total_nll = sum(nll for nll, _ in nlls)
         total_tokens = sum(num_tokens for _, num_tokens in nlls)
