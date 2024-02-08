@@ -122,11 +122,13 @@ class Llama(LlamaHyperparameters):
                         bnb_4bit_compute_dtype=torch.bfloat16,
                         bnb_4bit_use_double_quant=False
                     ),
+                    torch_dtype=torch.bfloat16,
                     device_map='auto'
                 )
             elif self.quantize == 'int8':
                 quant_kwargs = dict(
                     load_in_8bit=True,
+                    torch_dtype=torch.bfloat16,
                     device_map='auto'
                 )
             elif self.quantize == 'bf16':
@@ -148,7 +150,7 @@ class Llama(LlamaHyperparameters):
             load_path = merged_path
         else:
             load_path = self.base
-        self.model = AutoModelForCausalLM.from_pretrained(load_path, torch_dtype=torch.bfloat16, **quant_kwargs)
+        self.model = AutoModelForCausalLM.from_pretrained(load_path, **quant_kwargs)
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
         self.model.resize_token_embeddings(len(self.tokenizer))
