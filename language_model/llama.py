@@ -53,7 +53,7 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
 class LlamaHyperparameters(ez.Settings):
     base: ez.ColStr = ez.Def("meta-llama/Llama-2-{param_magnitude}-chat-hf")
     param_magnitude: ez.ColStr = ez.Def('7b')
-    format: ez.ColStr = ez.Def('''[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>''')
+    format: ez.ColStr = ez.Def('''[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST]''')
     train_on_s2s_inputs: ez.ColBool = ez.Def(False)
     quantize: ez.ColStr = ez.Def('nf4')
     checkpoint: ez.ColStr = None
@@ -181,59 +181,54 @@ class Llama(LlamaHyperparameters):
         return path
 
     def preprocess(self, inputs=None, outputs=None):
-        if outputs is None:
-            if inputs and not isinstance(next(iter(inputs)), str):
-                inputs, outputs = zip(*inputs)
-        if inputs is not None and outputs is not None:
-            data = zip(inputs, outputs)
-            splitter = self.format.find('{output}')
-            input_format = self.format[:splitter].strip()
-            output_format = self.format[splitter:].strip()
-            datalist = []
-            for input, output in data:
-                input_tokens = self.tokenizer(input_format.format(input=input))
-                output_tokens = self.tokenizer(output_format.format(output=output), add_special_tokens=False)
-                input_ids = input_tokens['input_ids']
-                output_ids = output_tokens['input_ids']
-                overflow = len(input_ids) + len(output_ids) - self.max_sequence_length
-                if overflow > 0:
-                    input_overflow = min(overflow, max(0, len(input_ids) - self.protected_input_length))
-                    input_ids = input_ids[input_overflow:]
-                    output_ids = output_ids[:max(0, self.max_sequence_length - len(input_ids))]
-                if self.train_on_s2s_inputs:
-                    labels = input_ids + output_ids
-                else:
-                    labels = [loss_mask]*len(input_ids) + output_ids
-                datalist.append(dict(
-                    input_ids=input_ids + output_ids,
-                    attention_mask=[1] * len(input_ids) + [1] * len(output_ids),
-                    labels=labels
-                ))
-        elif outputs is not None:
-            splitter = self.format.find('{input}')
-            format = self.format.replace('{input}', '')
-            if format[splitter-1:splitter+1] == '  ':
-                format = format[:splitter-1] + format[splitter:]
-            datalist = [
-                self.tokenizer(format.format(output=input), text_target=input)
-                for input in inputs
-            ]
-        elif inputs is not None:
-            splitter = self.format.find('{output}')
-            format = self.format[:splitter].rstrip()
-            datalist = [
-                self.tokenizer(format.format(input=input))
-                for input in inputs
-            ]
-        else:
-            raise ValueError("Must provide either inputs or outputs")
-        if self.max_sequence_length is not None:
-            for case in datalist:
-                truncation = max(0, len(case['input_ids']) - self.max_sequence_length)
-                case['input_ids'] = case['input_ids'][truncation:]
-                case['attention_mask'] = case['attention_mask'][truncation:]
-                if 'labels' in case:
-                    case['labels'] = case['labels'][truncation:]
+        if inputs and not isinstance(next(iter(inputs)), str):
+            inputs, outputs = zip(*inputs)
+        elif outputs is None:
+            outputs = [None] * len(inputs)
+        elif inputs is None:
+            inputs = [None] * len(outputs)
+        data = zip(inputs, outputs)
+        input_pre_format, input_post_format = self.format.split('{input}')
+        pre_format_tokens = self.tokenizer(input_pre_format.rstrip(), padding=False)['input_ids']
+        post_format_tokens = self.tokenizer(
+            input_post_format.lstrip(), add_special_tokens=False, padding=False
+        )['input_ids']
+        num_format_tokens = len(pre_format_tokens) + len(post_format_tokens)
+        datalist = []
+        for input, output in data:
+            input_tokens = self.tokenizer(
+                input, add_special_tokens=False, padding=False
+            )['input_ids'] if input else []
+            output_tokens = self.tokenizer(
+                output, add_special_tokens=False, padding=False
+            )['input_ids'] if output else []
+            out = int(output is not None)
+            overflow = num_format_tokens + len(input_tokens) + len(output_tokens) + out - self.max_sequence_length
+            if overflow > 0:
+                input_overflow = min(overflow, max(0, len(input_tokens) - self.protected_input_length))
+                input_tokens = input_tokens[input_overflow:]
+            overflow = num_format_tokens + len(input_tokens) + len(output_tokens) + out - self.max_sequence_length
+            if overflow > 0:
+                output_overflow = min(overflow, len(output_tokens))
+                output_tokens = output_tokens[:-output_overflow]
+            if self.train_on_s2s_inputs:
+                labels = (
+                    pre_format_tokens + input_tokens + post_format_tokens + output_tokens +
+                    ([self.tokenizer.eos_token_id] if out else [])
+                )
+            else:
+                labels = (
+                    [loss_mask] * len(pre_format_tokens + input_tokens + post_format_tokens) + output_tokens +
+                    ([self.tokenizer.eos_token_id] if out else [])
+                )
+            all_tokens = (
+                pre_format_tokens + input_tokens + post_format_tokens + output_tokens +
+                ([self.tokenizer.eos_token_id] if out else [])
+            )
+            attention_mask = [1] * len(all_tokens)
+            assert len(all_tokens) <= self.max_sequence_length, \
+                f"Token length {len(all_tokens)} exceeds max sequence length {self.max_sequence_length}"
+            datalist.append(dict(input_ids=all_tokens, attention_mask=attention_mask, labels=labels))
         return datalist
 
     def _set_up_dataloader(self, inputs, outputs, batch_size=1, shuffle=False):
@@ -244,13 +239,15 @@ class Llama(LlamaHyperparameters):
                 tokenizer=self.tokenizer,
                 return_tensors='pt',
                 pad_to_multiple_of=8,
+                padding=True
             )
         else:
-            if outputs is None:
-                if isinstance(next(iter(inputs)), str):
-                    outputs = [None] * len(inputs)
-                else:
-                    inputs, outputs = list(zip(*inputs))
+            if inputs and not isinstance(next(iter(inputs)), str):
+                inputs, outputs = zip(*inputs)
+            elif outputs is None:
+                outputs = [None] * len(inputs)
+            elif inputs is None:
+                inputs = [None] * len(outputs)
             datalist = [{'input': input, 'output': output} for input, output in zip(inputs, outputs)]
             dataset = Dataset.from_list(datalist)
             collator = DataCollatorWithPreprocessing(
@@ -294,6 +291,8 @@ class Llama(LlamaHyperparameters):
         display = tqdm(total=self.epochs * len(inputs), desc='Training', position=0, leave=True)
         epoch_checkpoint_progress = 0
         epoch_yield_progress = 0
+        num_per_yield = int(yield_every_x_epochs * len(inputs))
+        num_per_checkpoint = int(self.checkpoint_after_every_x_epochs * len(inputs))
         for self.epoch in range(self.epochs):
             nlls = []
             for self.step, batch in enumerate(dataloader):
@@ -314,19 +313,22 @@ class Llama(LlamaHyperparameters):
                 display.update(len(batch['input_ids']))
                 if (
                     self.checkpoint_after_every_x_epochs and
-                    epoch_checkpoint_progress // int(self.checkpoint_after_every_x_epochs * len(inputs))
+                    epoch_checkpoint_progress // num_per_checkpoint
                 ):
                     self.save_checkpoint()
-                    epoch_checkpoint_progress = (
-                        epoch_checkpoint_progress % int(self.checkpoint_after_every_x_epochs * len(inputs))
-                    )
-                if epoch_yield_progress // int(yield_every_x_epochs * len(inputs)):
+                    epoch_checkpoint_progress = epoch_checkpoint_progress % num_per_checkpoint
+                if epoch_yield_progress // num_per_yield:
                     total_nll = sum(nll for nll, _ in nlls)
                     total_tokens = sum(num_tokens for _, num_tokens in nlls)
                     perplexity = math.exp(total_nll / total_tokens)
                     nlls = []
-                    epoch_yield_progress = epoch_yield_progress % int(yield_every_x_epochs * len(inputs))
+                    epoch_yield_progress = epoch_yield_progress % num_per_yield
                     yield perplexity
+            if epoch_yield_progress and nlls:
+                total_nll = sum(nll for nll, _ in nlls)
+                total_tokens = sum(num_tokens for _, num_tokens in nlls)
+                perplexity = math.exp(total_nll / total_tokens)
+                yield perplexity
         if self.checkpoint_clean_up_after_train:
             shutil.rmtree('ex/scratch/checkpoint', ignore_errors=True)
 
@@ -402,7 +404,8 @@ class DataCollatorWithPreprocessing:
         self.seq2seq_collator = DataCollatorForSeq2Seq(
             tokenizer=tokenizer,
             return_tensors=return_tensors,
-            pad_to_multiple_of=8
+            pad_to_multiple_of=8,
+            padding=True
         )
         self.model = model
 
