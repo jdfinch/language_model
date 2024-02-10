@@ -98,7 +98,6 @@ class LlamaHyperparameters(ez.Settings):
 
 
 class Llama(LlamaHyperparameters):
-
     def __post_init__(self):
         LlamaHyperparameters.__post_init__(self)
         if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
