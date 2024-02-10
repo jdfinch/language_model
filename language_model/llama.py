@@ -170,7 +170,8 @@ class Llama(LlamaHyperparameters):
     def save(self, path:ez.filelike):
         path = ez.File(path).path
         self.model.save_pretrained(path)
-        ez.File(path/'hyperparameters.json').save(self.hyperparameters)
+        hyperparameters = {k:v for k,v in self.hyperparameters.items() if k != 'settings'}
+        ez.File(path/'hyperparameters.json').save(hyperparameters)
         return path
 
     def save_checkpoint(self, path: ez.filelike = None):
