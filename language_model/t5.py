@@ -86,7 +86,7 @@ class T5Hyperparameters(ez.Settings):
     gen_batch_size: ez.ColInt = ez.Def(1)
     ppl_batch_size: ez.ColInt = ez.Def(1)
     dynamic_tokenization: ez.ColBool = ez.Def(True)
-    use_local_files: ez.ColBool = ez.Def(True)
+    use_local_files: ez.ColBool = ez.Def(False)
 
     def actual_train_batch_size(self):
         return self.train_batch_size // self.gradient_accumulation_steps

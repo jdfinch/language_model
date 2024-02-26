@@ -100,6 +100,8 @@ class LlamaHyperparameters(ez.Settings):
 class Llama(LlamaHyperparameters):
     def __post_init__(self):
         LlamaHyperparameters.__post_init__(self)
+        assert self.protected_input_length < self.max_sequence_length, \
+            f"Protected input length {self.protected_input_length} must not exceed max sequence length {self.max_sequence_length}"
         if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
             loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json').load()
             specified_hyperparameters = vars(self).pop('settings')
