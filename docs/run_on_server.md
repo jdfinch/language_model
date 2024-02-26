@@ -4,6 +4,8 @@
 
 In this tutorial, we'll walk through setting up a remote development environment using VS Code or PyCharm Pro, cloning a project, and configuring it to run on a server with Miniconda. We'll cover steps including creating a virtual environment, automatic deployment, running scripts remotely, and utilizing SLURM for GPU jobs.
 
+There's a lot of steps here which can be overwhelming, but remember you can just ask chatgpt to help you with any of these steps if you run into trouble, most of the steps are commonly talked about on the internet so chatgpt usually knows what to do.
+
 ### Prerequisites:
 - VS Code or PyCharm Pro installed on your local machine
 - SSH access to a remote server
