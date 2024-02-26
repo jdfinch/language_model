@@ -6,6 +6,7 @@ import pathlib as pl
 
 with ez.CapturedVars() as models:
     from language_model.llama import Llama
+    from language_model.t5 import T5
 
 alpha = lambda s: ''.join(c for c in s if c.isalpha() or c == ' ')
 
