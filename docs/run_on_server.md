@@ -27,7 +27,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
    - Create a Python script in your project that imports from `language_model` to ensure the import works.
 
 5. **Log into the Server:**
-   - SSH into your server using your terminal: `ssh username@server_ip`.
+   - SSH into your server using your terminal: `ssh username@server_ip`. Remember to use the VPN if required before you try to connect!
 
 6. **Install Miniconda:**
    - Navigate to your desired directory (e.g., `/local/scratch/yourusername`).
