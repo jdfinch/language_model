@@ -101,7 +101,7 @@ Important default settings:
 
 The 7 billion parameter chat variant of Llama2 is the default base model. This can be changed using the `base` and/or `param_magnitude` params to specify a different base model.
 
-`nf4` quantization (`quantize` parameter can be set to `'nf4', 'int8', 'fp16', None`), which is fast and memory efficient but may sacrifice accuracy. 
+`nf4` quantization (`quantize` parameter can be set to `'nf4', 'int8', 'bf16', None`), which is fast and memory efficient but may sacrifice accuracy. 
 
 Input and output is wrapped by the format `"[INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> {input} [/INST] {output} </s>"`. This format is expected by Llama2 and changing it can negatively affect the performance, but you can change it using the `format` parameter. 
 
