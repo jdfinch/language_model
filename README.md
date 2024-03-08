@@ -10,10 +10,15 @@ conda env create --name PROJ python=3.10
 conda activate PROJ
 pip install -r requirements.txt
 ```
+For Llama:
 
 You will need access to a a >12GB GPU to run the model.
 
 GPU usage will reach >30 GB for nontrivial model training on the smallest (7B) models.
+
+For T5:
+
+You can train most T5 models on small GPU.
 
 ## Usage
 
