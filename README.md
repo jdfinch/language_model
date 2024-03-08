@@ -17,6 +17,8 @@ GPU usage will reach >30 GB for nontrivial model training on the smallest (7B) m
 
 ## Usage
 
+Two model architectures are provided as of now: Llama2 and T5. Once you instantiate your desired model with its hyperparameters, you can use them the same way in training and generation.
+
 ```python
 from language_model.llama import Llama
 
@@ -30,6 +32,16 @@ To use **Meta Llama2**, you will need to request access to the model [here](http
 
 Until you get access to the model, you can use the [NousResearch version](https://huggingface.co/NousResearch/Llama-2-7b-chat-hf) without a token by setting `base="NousResearch/Llama-2-7b-chat-hf"` in the `Llama` constructor.
 
+```python
+from language_model.t5 import T5
+
+t5 = T5(
+    # Specify all hyperparameters here
+    #   (or don't, and defaults will be used)
+)
+```
+
+You do not need any special permissions to create at T5 model. All examples below use the `llama` object, but you can replace it with `t5` if you are using a T5 model instead.
 
 ### Generate Text
 
@@ -97,6 +109,20 @@ ppl = llama.perplexity(data)
 
 ### Default Parameters and Performance Considerations
 
+#### General
+
+`train_batch_size=1` and `gen_batch_size=1`, with `gradient_accumulation_steps=1`. Increase batch size to speed up at the cost of higher memory utilization.
+
+Consider reducing the default values of `max_sequence_length`, since they usually are larger than necessary for a task, so consider reducing to trigger left-side input truncation. To protect a minimum amount of input from being truncated, the `protected_input_length` parameter (default `512`) can be used to prevent right-side input tokens from being truncated (the right-hand side of output tokens will be truncated instead during training).
+
+`max_output_length=512`, but generating this amount is somewhat slow.
+
+Training is sensitive to `learning_rate`, so consider adjusting for your training task.
+
+Generation is sensitive to `repetition_penalty` and `num_beams` (increasing `num_beams` increases memory cost but may improve generation quality).
+
+#### Llama
+
 Important default settings:
 
 The 7 billion parameter chat variant of Llama2 is the default base model. This can be changed using the `base` and/or `param_magnitude` params to specify a different base model.
@@ -108,16 +134,6 @@ Input and output is wrapped by the format `"[INST] <<SYS>> You are a helpful, re
 Low Rank Adaptation (LoRA) specified as `lora=8`, but can be set to `None` to disable LoRA and make all parameters trainable.
 
 By default LoRA applied to these modules: `['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']`
-
-`train_batch_size=1` and `gen_batch_size=1`, with `gradient_accumulation_steps=1`. Increase batch size to speed up at the cost of higher memory utilization.
-
-`max_sequence_length=4096` which is what Llama can handle, but is usually too large, so consider reducing to trigger left-side input truncation. To protect a minimum amount of input from being truncated, the `protected_input_length` parameter (default `512`) can be used to prevent right-side input tokens from being truncated (the right-hand side of output tokens will be truncated instead during training).
-
-`max_output_length=512`, but generating this amount is somewhat slow.
-
-Training is sensitive to `learning_rate`, so consider adjusting for your training task.
-
-Generation is sensitive to `repetition_penalty` and `num_beams` (increasing `num_beams` increases memory cost but may improve generation quality).
 
 
 
