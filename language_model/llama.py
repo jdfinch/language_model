@@ -42,7 +42,7 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
     base_model = AutoModelForCausalLM.from_pretrained(
         base_model_name, torch_dtype=torch.float16, device_map='auto'
     )
-    model = peft.PeftModel.from_pretrained(base_model, lora_path)
+    model = peft.PeftModel.from_pretrained(base_model, lora_path, device_map='auto')
     merged = model.merge_and_unload()
     if merged_path is None:
         merged_path = lora_path.parent / f"{name}.MERGED"
@@ -144,10 +144,10 @@ class Llama(LlamaHyperparameters):
         delete_merge_path = None
         if load_path.exists() and (load_path/'adapter_config.json').exists() and self.lora_merge_on_load:
             merged_path = load_path.parent / f"{load_path.name}.MERGED"
-            delete_after = not merged_path.exists()
-            ez.subproc(load_merge_and_save_lora, load_path)
-            if delete_after:
+            if not merged_path.exists():
+                merged_path = load_path.parent / f"{load_path.name}.{ez.uuid()}.MERGED"
                 delete_merge_path = merged_path
+            ez.subproc(load_merge_and_save_lora, load_path, merged_path)
             load_path = merged_path
         else:
             load_path = self.base

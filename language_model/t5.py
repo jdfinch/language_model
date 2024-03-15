@@ -111,11 +111,11 @@ class T5(T5Hyperparameters):
             tokenizer_reponame,
             padding_side='right',
             truncation_side='right',
-            model_max_length=1000000, # high number; truncation handled manually
+            model_max_length=1_000_000_000, # high number; truncation handled manually
             trust_remote_code=True,
             local_files_only=self.use_local_files
         )
-        quant_kwargs = {'device_map': 'auto'}
+        quant_kwargs:dict = {'device_map': 'auto'}
         if self.quantize is not None:
             if self.quantize == 'nf4':
                 quant_kwargs.update(dict(
@@ -271,15 +271,17 @@ class T5(T5Hyperparameters):
             inputs, outputs, self.actual_train_batch_size(), shuffle=True
         )
         if self.optimizer == 'adamw_bnb_8bit':
-            print('Using AdamW8bit optimizer...')
             optimizer = AdamW8bit(
                 self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
             )
         elif self.optimizer == 'adafactor':
-            print('Using Adafactor optimizer...')
             optimizer = Adafactor(
                 self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, relative_step=False
             )
+        else:
+            raise ValueError(
+                f"Invalid optimizer: {self.optimizer}."
+                f" Supported optimizers are: 'adamw_bnb_8bit', 'adafactor'")
         scheduler = warmup_scheduler(optimizer, num_warmup_steps=self.warmup_steps)
         dataloader, model, optimizer, scheduler = self.acclerator.prepare(
             dataloader, self.model, optimizer, scheduler  # noqa
