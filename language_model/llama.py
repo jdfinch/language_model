@@ -33,14 +33,16 @@ os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'
 loss_mask = -100
 
 
-def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=None):
+def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=None, dtype='bf16'):
+    dtypes = {'bf16': torch.bfloat16, 'fp16': torch.float16, 'fp32': torch.float32}
+    dtype = dtypes[dtype]
     lora_path = ez.File(lora_path).path
     print(lora_path)
     name = lora_path.name
     adapter_config = ez.File(lora_path / 'adapter_config.json').load()
     base_model_name = adapter_config['base_model_name_or_path']
     base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_name, torch_dtype=torch.float16, device_map='auto'
+        base_model_name, torch_dtype=dtype, device_map='auto'
     )
     model = peft.PeftModel.from_pretrained(base_model, lora_path, device_map='auto')
     merged = model.merge_and_unload()
@@ -147,7 +149,7 @@ class Llama(LlamaHyperparameters):
             if not merged_path.exists():
                 merged_path = load_path.parent / f"{load_path.name}.{ez.uuid()}.MERGED"
                 delete_merge_path = merged_path
-            ez.subproc(load_merge_and_save_lora, load_path, merged_path)
+            ez.subproc(load_merge_and_save_lora, load_path, merged_path, 'bf16')
             load_path = merged_path
         else:
             load_path = self.base
@@ -196,6 +198,8 @@ class Llama(LlamaHyperparameters):
             input_post_format.lstrip(), add_special_tokens=False, padding=False
         )['input_ids']
         num_format_tokens = len(pre_format_tokens) + len(post_format_tokens)
+        assert num_format_tokens <= self.max_sequence_length - self.protected_input_length, \
+            f"Format tokens {num_format_tokens} exceed difference between max_sequence_length and protected_input_length, increase the difference or shorten the format by {self.max_sequence_length - self.protected_input_length}"
         datalist = []
         for input, output in data:
             input_tokens = self.tokenizer(
