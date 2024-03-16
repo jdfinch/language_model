@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from transformers import (
     T5ForConditionalGeneration,
+    T5Config,
     AutoTokenizer,
     BitsAndBytesConfig,
     TrainingArguments,
@@ -32,14 +33,16 @@ os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'
 loss_mask = -100
 
 
-def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=None):
+def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=None, dtype='bf16'):
+    dtypes = {'bf16': torch.bfloat16, 'fp16': torch.float16, 'fp32': torch.float32}
+    dtype = dtypes[dtype]
     lora_path = ez.File(lora_path).path
     print(lora_path)
     name = lora_path.name
     adapter_config = ez.File(lora_path / 'adapter_config.json').load()
     base_model_name = adapter_config['base_model_name_or_path']
     base_model = T5ForConditionalGeneration.from_pretrained(
-        base_model_name, torch_dtype=torch.float16, device_map='auto'
+        base_model_name, torch_dtype=dtype, device_map='auto'
     )
     model = peft.PeftModel.from_pretrained(base_model, lora_path)
     merged = model.merge_and_unload()
@@ -68,11 +71,12 @@ class T5Hyperparameters(ez.Settings):
     optimizer: ez.ColStr = ez.Def('adamw_bnb_8bit')
     learning_rate: ez.ColFloat = ez.Def(1e-4)
     weight_decay: ez.ColFloat = ez.Def(0.0)
+    dropout: ez.ColFloat = ez.Def(0.0)
     warmup_steps: ez.ColInt = ez.Def(0)
     lr_scheduler_type: ez.ColStr = ez.Def('constant')
     lora: ez.ColInt = ez.Def(8)
     lora_alpha: ez.ColInt = None
-    lora_dropout: ez.ColFloat = ez.Def(0.1)
+    lora_dropout: ez.ColFloat = ez.Def(0.0)
     lora_modules: ez.Column[list[str]] | list[str] | None = None
     lora_merge_on_load: ez.ColBool = ez.Def(True)
     gradient_checkpointing: ez.ColBool = ez.Def(True)
@@ -146,7 +150,7 @@ class T5(T5Hyperparameters):
         if load_path.exists() and (load_path / 'adapter_config.json').exists() and self.lora_merge_on_load:
             merged_path = load_path.parent / f"{load_path.name}.MERGED"
             delete_after = not merged_path.exists()
-            ez.subproc(load_merge_and_save_lora, load_path)
+            ez.subproc(load_merge_and_save_lora, load_path, 'bf16')
             if delete_after:
                 delete_merge_path = merged_path
             load_path = merged_path
@@ -155,7 +159,8 @@ class T5(T5Hyperparameters):
         self.model = T5ForConditionalGeneration.from_pretrained(
             load_path,
             local_files_only=self.use_local_files, 
-            **quant_kwargs
+            **quant_kwargs,
+            dropout_rate=self.dropout,
         )
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)

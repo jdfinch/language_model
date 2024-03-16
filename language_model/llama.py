@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset
 from transformers import (
     AutoModelForCausalLM,
+    LlamaConfig,
     AutoTokenizer,
     BitsAndBytesConfig,
     TrainingArguments,
@@ -71,12 +72,13 @@ class LlamaHyperparameters(ez.Settings):
     optimizer: ez.ColStr = ez.Def('adamw_bnb_8bit')
     learning_rate: ez.ColFloat = ez.Def(2e-4)
     weight_decay: ez.ColFloat = ez.Def(0.001)
+    dropout: ez.ColFloat = ez.Def(0.0)
     max_gradient_norm: ez.ColFloat = ez.Def(0.3)
     warmup_steps: ez.ColInt = ez.Def(0)
     lr_scheduler_type: ez.ColStr = ez.Def('constant')
     lora: ez.ColInt = ez.Def(8)
     lora_alpha: ez.ColInt = None
-    lora_dropout: ez.ColFloat = ez.Def(0.1)
+    lora_dropout: ez.ColFloat = ez.Def(0.0)
     lora_modules: ez.Column[list[str]]|list[str]|None = None
     lora_merge_on_load: ez.ColBool = ez.Def(True)
     gradient_checkpointing: ez.ColBool = ez.Def(True)
@@ -153,7 +155,11 @@ class Llama(LlamaHyperparameters):
             load_path = merged_path
         else:
             load_path = self.base
-        self.model = AutoModelForCausalLM.from_pretrained(load_path, **quant_kwargs)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            load_path,
+            **quant_kwargs,
+            attention_dropout=self.dropout,
+        )
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
         self.model.resize_token_embeddings(len(self.tokenizer))
