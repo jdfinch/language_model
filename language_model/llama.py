@@ -72,7 +72,6 @@ class LlamaHyperparameters(ez.Settings):
     optimizer: ez.ColStr = ez.Def('adamw_bnb_8bit')
     learning_rate: ez.ColFloat = ez.Def(2e-4)
     weight_decay: ez.ColFloat = ez.Def(0.001)
-    dropout: ez.ColFloat = ez.Def(0.0)
     max_gradient_norm: ez.ColFloat = ez.Def(0.3)
     warmup_steps: ez.ColInt = ez.Def(0)
     lr_scheduler_type: ez.ColStr = ez.Def('constant')
@@ -158,7 +157,6 @@ class Llama(LlamaHyperparameters):
         self.model = AutoModelForCausalLM.from_pretrained(
             load_path,
             **quant_kwargs,
-            attention_dropout=self.dropout,
         )
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
