@@ -52,6 +52,31 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
     merged.save_pretrained(merged_path, safe_serialization=False, save_peft_format=False)
     return merged_path
 
+def get_merged_model(model_path, dtype='bf16'):
+    model_path = pl.Path(model_path)
+    if model_path.suffix == '.MERGED':
+        model_path = model_path.parent / model_path.name.split('.')[0]
+    if model_path.exists() and not (model_path/'adapter_config.json').exists():
+        return model_path
+    elif model_path.exists() and (model_path/'adapter_config.json').exists():
+        merged_model_path = model_path.parent / f"{model_path.name}.MERGED"
+        if merged_model_path.exists():
+            return merged_model_path
+        else:
+            adapter_config = ez.File(model_path/'adapter_config.json').load()
+            adapter_base_path = pl.Path(adapter_config['base_model_name_or_path'])
+            merged_adapter_base_path = get_merged_model(adapter_base_path)
+            if merged_adapter_base_path != adapter_base_path:
+                adapter_config['base_model_name_or_path'] = str(merged_adapter_base_path)
+                ez.File(model_path/'adapter_config.json').save(adapter_config)
+            merged_model_path = model_path.parent / f"{model_path.name}.MERGED"
+            ez.subproc(load_merge_and_save_lora, model_path, merged_model_path, dtype)
+            return merged_model_path
+    else:
+        return model_path
+
+
+
 @settings
 class LlamaHyperparameters(ez.Settings):
     base: ez.ColStr = ez.Def("meta-llama/Llama-2-{param_magnitude}-chat-hf")
@@ -145,15 +170,23 @@ class Llama(LlamaHyperparameters):
                                  f"Supported quantizations are: 'nf4', 'int8', 'bf16', None")
         load_path = pl.Path(self.base)
         delete_merge_path = None
-        if load_path.exists() and (load_path/'adapter_config.json').exists() and self.lora_merge_on_load:
-            merged_path = load_path.parent / f"{load_path.name}.MERGED"
-            if not merged_path.exists():
-                merged_path = load_path.parent / f"{load_path.name}.{ez.uuid()}.MERGED"
-                delete_merge_path = merged_path
-            ez.subproc(load_merge_and_save_lora, load_path, merged_path, 'bf16')
-            load_path = merged_path
-        else:
-            load_path = self.base
+        if load_path.exists() and (load_path/'adapter_config.json').exists():
+            adapter_config = ez.File(load_path/'adapter_config.json').load()
+            adapter_base_path = pl.Path(adapter_config['base_model_name_or_path'])
+            if not adapter_base_path.exists() and adapter_base_path.suffix == '.MERGED':
+                merged_adapter_base_path = get_merged_model(adapter_base_path, 'bf16')
+                if adapter_base_path != merged_adapter_base_path:
+                    adapter_config['base_model_name_or_path'] = str(merged_adapter_base_path)
+                    ez.File(load_path/'adapter_config.json').save(adapter_config)
+            if self.lora_merge_on_load:
+                merged_path = load_path.parent / f"{load_path.name}.MERGED"
+                if not merged_path.exists():
+                    merged_path = load_path.parent / f"{load_path.name}.{ez.uuid()}.MERGED"
+                    delete_merge_path = merged_path
+                ez.subproc(load_merge_and_save_lora, load_path, merged_path, 'bf16')
+                load_path = merged_path
+        elif load_path.suffix == '.MERGED':
+            load_path = get_merged_model(load_path, 'bf16')
         self.model = AutoModelForCausalLM.from_pretrained(
             load_path,
             **quant_kwargs,
