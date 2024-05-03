@@ -12,7 +12,7 @@ from transformers import (
     DataCollatorForSeq2Seq,
     GenerationConfig,
     get_constant_schedule_with_warmup as warmup_scheduler,
-    Adafactor
+    Adafactor, AdamW
 )
 from bitsandbytes.optim import AdamW8bit
 from peft import LoraConfig, TaskType
@@ -180,7 +180,7 @@ class T5(T5Hyperparameters):
     
     def save(self, path:ez.filelike):
         path = ez.File(path).path
-        self.model.save_pretrained(path)
+        self.model.save_pretrained(path, safe_serialization=False)
         hyperparameters = {k:v for k,v in self.hyperparameters.items() if k != 'settings'}
         ez.File(path/'hyperparameters.json').save(hyperparameters)
         return path
@@ -283,10 +283,14 @@ class T5(T5Hyperparameters):
             optimizer = Adafactor(
                 self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, relative_step=False
             )
+        elif self.optimizer == 'adam' or self.optimizer == 'adamw':
+            optimizer = AdamW(
+                self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+            )
         else:
             raise ValueError(
                 f"Invalid optimizer: {self.optimizer}."
-                f" Supported optimizers are: 'adamw_bnb_8bit', 'adafactor'")
+                f" Supported optimizers are: 'adam', 'adamw_bnb_8bit', 'adafactor'")
         scheduler = warmup_scheduler(optimizer, num_warmup_steps=self.warmup_steps)
         dataloader, model, optimizer, scheduler = self.acclerator.prepare(
             dataloader, self.model, optimizer, scheduler  # noqa

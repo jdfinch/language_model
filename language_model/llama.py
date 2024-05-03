@@ -13,7 +13,9 @@ from transformers import (
     Trainer,
     DataCollatorForSeq2Seq,
     GenerationConfig,
-    get_constant_schedule_with_warmup as warmup_scheduler
+    get_constant_schedule_with_warmup as warmup_scheduler,
+    Adafactor,
+    AdamW
 )
 from bitsandbytes.optim import AdamW8bit
 from peft import LoraConfig
@@ -321,9 +323,23 @@ class Llama(LlamaHyperparameters):
         dataloader = self._set_up_dataloader(
             inputs, outputs, self.actual_train_batch_size(), shuffle=True
         )
-        optimizer = AdamW8bit(
-            self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
-        )
+        if self.optimizer == 'adamw_bnb_8bit':
+            optimizer = AdamW8bit(
+                self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+            )
+        elif self.optimizer == 'adafactor':
+            optimizer = Adafactor(
+                self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay, relative_step=False
+            )
+        elif self.optimizer == 'adam' or self.optimizer == 'adamw':
+            optimizer = AdamW(
+                self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+            )
+        else:
+            raise ValueError(
+                f"Invalid optimizer: {self.optimizer}."
+                f" Supported optimizers are: 'adam', 'adamw_bnb_8bit', 'adafactor'"
+            )
         scheduler = warmup_scheduler(optimizer, num_warmup_steps=self.warmup_steps)
         dataloader, model, optimizer, scheduler = self.acclerator.prepare(
             dataloader, self.model, optimizer, scheduler  # noqa
