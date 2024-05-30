@@ -29,6 +29,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
 5. **Install Miniconda:**
    - Navigate to your desired directory (e.g., `/local/scratch/yourusername`).
    - Download and install Miniconda
+   - Make sure the miniconda3 folder is located under `/local/scratch/yourusername` when prompted by the installer
 
 6. **Create Virtual Environment:**
    - Create a new virtual environment using Miniconda:
