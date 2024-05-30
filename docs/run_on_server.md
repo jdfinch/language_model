@@ -14,7 +14,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
 ### Steps:
 
 1. **Create a Project Locally:**
-   - Open your preferred IDE (VS Code or PyCharm Pro).
+   - Open your preferred IDE (VS Code or PyCharm Pro, but Pycharm Pro is recommended and is free for students).
    - Create a new project in your desired location.
 
 2. **Clone Language_Model:**
@@ -23,61 +23,58 @@ There's a lot of steps here which can be overwhelming, but remember you can just
 3. **Mark as Sources Root/Python Path:**
    - Mark the `language_model` folder as a sources root or add it to your Python path to enable importing.
 
-4. **Create a Script:**
-   - Create a Python script in your project that imports from `language_model` to ensure the import works.
-
-5. **Log into the Server:**
+4. **Log into the Server:**
    - SSH into your server using your terminal: `ssh username@server_ip`. Remember to use the VPN if required before you try to connect!
 
-6. **Install Miniconda:**
+5. **Install Miniconda:**
    - Navigate to your desired directory (e.g., `/local/scratch/yourusername`).
    - Download and install Miniconda
 
-7. **Create Virtual Environment:**
+6. **Create Virtual Environment:**
    - Create a new virtual environment using Miniconda:
      ```bash
      conda create -n myenv python=3.10
      ```
 
-8. **Create Project Directory on Server:**
+7. **Create Project Directory on Server:**
    - Create a directory for your project on the server (e.g., `/local/scratch/yourusername/myproject`).
 
-9. **Set Up Remote Interpreter:**
+8. **Set Up Remote Interpreter:**
    - In your local IDE, set up a remote interpreter that links to the virtual environment on the server. You will need to link to the virtual env binary like `/local/scratch/username/miniconda3/envs/myenv/bin/python`.
 
-10. **Automatic Deployment:**
+9. **Automatic Deployment:**
     - Configure automatic deployment to link your local project to the empty server folder you created. This ensures any file changes are automatically uploaded to the server.
 
-11. **Verify Script Execution:**
+10. **Verify Script Execution:**
     - Print 'hello world' in your script and verify you can run it using the remote interpreter. Ensure that the import from `language_model` also works on the server.
 
-12. **Install Requirements:**
+11. **Install Requirements:**
     - SSH back into the server, activate your virtual environment, and install the requirements of `language_model` using pip:
       ```bash
       conda activate myenv
       pip install -r /local/scratch/username/myproject/language_model/requirements.txt
       ```
 
-13. **Verify Requirements Installed:**
+12. **Verify Requirements Installed:**
     - Add `import torch` to your script and verify that the remote interpreter can import it successfully.
 
-14. **Create Shell Script:**
+13. **Create Shell Script:**
     - Create a shell script (e.g., `run.sh`) in your project directory. This script sets necessary environment variables and runs your Python script. Please refer to `docs/run.sh` for an example.
 
-15. **Test Shell Script:**
+14. **Test Shell Script:**
     - SSH into the server, make the shell script executable, and run it:
       ```bash
       chmod +x run.sh
       ./run.sh
       ```
 
-16. **Run Script Using SLURM:**
+15. **Run Script Using SLURM:**
     - Run your script using SLURM for GPU jobs:
       ```bash
       sbatch run.sh
       ```
 
-17. **View Job Output:**
+16. **View Job Output:**
     - View the output of the job using:
       ```bash
       cat job.out
@@ -87,7 +84,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
       tail -f job.out
       ```
 
-18. **Coding and Running:**
+17. **Coding and Running:**
     - You're now set up to code as usual in your script. Any changes you save will automatically upload to the server. Run your script using `sbatch` on your shell script through SSH.
 
 Congratulations! You've successfully set up a remote development environment for your project, enabling you to code, deploy, and run scripts seamlessly on a remote server.
