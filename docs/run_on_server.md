@@ -46,7 +46,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
     - Configure automatic deployment to link your local project to the empty server folder you created. This ensures any file changes are automatically uploaded to the server.
 
 10. **Verify Script Execution:**
-    - Print 'hello world' in your script and verify you can run it using the remote interpreter. Ensure that the import from `language_model` also works on the server.
+    - Create a new python script. Print 'hello world' in your script and verify you can run it using the remote interpreter.
 
 11. **Install Requirements:**
     - SSH back into the server, activate your virtual environment, and install the requirements of `language_model` using pip:
@@ -56,7 +56,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
       ```
 
 12. **Verify Requirements Installed:**
-    - Add `import torch` to your script and verify that the remote interpreter can import it successfully.
+    - Add `import torch` to your script and verify that the remote interpreter can import it successfully. Try `from langauage_model.t5 import T5` to verify importing the language_model package as well.
 
 13. **Create Shell Script:**
     - Create a shell script (e.g., `run.sh`) in your project directory. This script sets necessary environment variables and runs your Python script. Please refer to `docs/run.sh` for an example.
