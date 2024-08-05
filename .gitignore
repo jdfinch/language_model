@@ -1,6 +1,7 @@
 .idea
 data
 ex
+scratch
 *.pyc
 *__pycache__*
 subgit

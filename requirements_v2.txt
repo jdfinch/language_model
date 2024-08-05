@@ -1,0 +1,12 @@
+
+
+--find-links https://download.pytorch.org/whl/torch_stable.html
+--find-links https://download.pytorch.org/whl/cu118
+
+torch==2.1.2+cu118
+transformers[deepspeed]
+accelerate
+peft
+bitsandbytes
+datasets
+
