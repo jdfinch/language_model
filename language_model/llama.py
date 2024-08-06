@@ -118,6 +118,7 @@ class LlamaHyperparameters(ez.Settings):
     gen_batch_size: ez.ColInt = ez.Def(1)
     ppl_batch_size: ez.ColInt = ez.Def(1)
     dynamic_tokenization: ez.ColBool = ez.Def(True)
+    tokenizer_reponame: ez.ColStr = ez.Def("meta-llama/Llama-2-7b-chat-hf")
 
     def actual_train_batch_size(self):
         return self.train_batch_size // self.gradient_accumulation_steps
@@ -138,11 +139,15 @@ class Llama(LlamaHyperparameters):
             hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
             vars(self).update(hyperparameters)
         self.hyperparameters: dict = dict(vars(self))
-        tokenizer_reponame = "meta-llama/Llama-2-7b-chat-hf"
+        tokenizer_reponame = self.tokenizer_reponame
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True)
         self.tokenizer.padding_side = 'left'
         self.tokenizer.return_special_tokens_mask = True
-        self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        if 'Llama-2' in tokenizer_reponame:
+            self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        else:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
         quant_kwargs = {}
         if self.quantize is not None:
             if self.quantize == 'nf4':
@@ -195,7 +200,8 @@ class Llama(LlamaHyperparameters):
         )
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
-        self.model.resize_token_embeddings(len(self.tokenizer))
+        if 'Llama-2' in tokenizer_reponame:
+            self.model.resize_token_embeddings(len(self.tokenizer))
         self.model.config.use_cache = False
         self.acclerator = Accelerator(gradient_accumulation_steps=self.gradient_accumulation_steps)
         assert self.train_batch_size % self.gradient_accumulation_steps == 0
@@ -430,7 +436,7 @@ class Llama(LlamaHyperparameters):
                 do_sample=self.sampled_generation,
                 top_p=self.top_p,
                 top_k=self.top_k,
-                eos_token_id=2
+                eos_token_id=2 if 'Llama-2' in self.base else self.tokenizer.eos_token_id,
             )
         encoded_gens = []
         input_lens = []
@@ -452,7 +458,14 @@ class Llama(LlamaHyperparameters):
         with ez.shush():
             decoded_gens = []
             for gen, input_len in zip(encoded_gens, input_lens):
-                generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=True)
+                if 'Llama-2' in self.tokenizer_reponame:
+                    generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=True)
+                else:
+                    generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=False)
+                    generated = generated[
+                        max(generated.rfind('<|end_header_id|>') + len('<|end_header_id|>'), 0):
+                        generated.rfind('<|eot_id|>')
+                    ]
                 decoded_gens.append(generated)
         return decoded_gens[0] if single else decoded_gens
 
@@ -483,10 +496,29 @@ class DataCollatorWithPreprocessing:
         return self.seq2seq_collator(preprocessed)
 
 
+llama3format = '''<|start_header_id|>system<|end_header_id|>
+
+Cutting Knowledge Date: December 2023
+Today Date: 26 Jul 2024
+
+You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+{input}<|eot_id|>'''
+
+llama3id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 def main():
-    pass
-
+    llama3 = Llama(
+        # base="meta-llama/Meta-Llama-3.1-8B-Instruct",
+        # param_magnitude='8B',
+        # format=llama3format,
+        # temperature=0.6,
+        # sampled_generation=True,
+        # repetition_penalty=1.0,
+        # tokenizer_reponame="meta-llama/Meta-Llama-3.1-8B-Instruct"
+    )
+    response = llama3.generate('What is the capital of France?')
+    print('Response:', response)
 
 if __name__ == '__main__':
     main()
