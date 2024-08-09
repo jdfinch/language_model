@@ -140,7 +140,7 @@ class Llama(LlamaHyperparameters):
             vars(self).update(hyperparameters)
         self.hyperparameters: dict = dict(vars(self))
         tokenizer_reponame = self.tokenizer_reponame
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True, padding_side='left')
         self.tokenizer.padding_side = 'left'
         self.tokenizer.return_special_tokens_mask = True
         if 'Llama-2' in tokenizer_reponame:
@@ -236,6 +236,11 @@ class Llama(LlamaHyperparameters):
             outputs = [None] * len(inputs)
         elif inputs is None:
             inputs = [None] * len(outputs)
+        if 'Llama-3' in self.tokenizer_reponame:
+            outputs = list(outputs)
+            for i, output in enumerate(outputs):
+                if output is not None:
+                    outputs[i] = f"<|start_header_id|>assistant<|end_header_id|>\n\n{output}"
         data = zip(inputs, outputs)
         input_pre_format, input_post_format = self.format.split('{input}')
         pre_format_tokens = self.tokenizer(input_pre_format.rstrip(), padding=False)['input_ids']
@@ -464,7 +469,7 @@ class Llama(LlamaHyperparameters):
                     generated = self.tokenizer.decode(gen[input_len:], skip_special_tokens=False)
                     generated = generated[
                         max(generated.rfind('<|end_header_id|>') + len('<|end_header_id|>'), 0):
-                        generated.rfind('<|eot_id|>')
+                        generated.find('<|eot_id|>')
                     ]
                 decoded_gens.append(generated)
         return decoded_gens[0] if single else decoded_gens
@@ -507,17 +512,63 @@ You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
 llama3id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
+llama3config = """
+{
+  "architectures": [
+    "LlamaForCausalLM"
+  ],
+  "attention_bias": false,
+  "attention_dropout": 0.0,
+  "bos_token_id": 128000,
+  "eos_token_id": [
+    128001,
+    128008,
+    128009
+  ],
+  "hidden_act": "silu",
+  "hidden_size": 4096,
+  "initializer_range": 0.02,
+  "intermediate_size": 14336,
+  "max_position_embeddings": 131072,
+  "mlp_bias": false,
+  "model_type": "llama",
+  "num_attention_heads": 32,
+  "num_hidden_layers": 32,
+  "num_key_value_heads": 8,
+  "pretraining_tp": 1,
+  "rms_norm_eps": 1e-05,
+  "rope_scaling": { "factor": 8.0, "type": "dynamic" },
+  "rope_theta": 500000.0,
+  "tie_word_embeddings": false,
+  "torch_dtype": "bfloat16",
+  "transformers_version": "4.42.3",
+  "use_cache": true,
+  "vocab_size": 128256
+}
+"""
+
 def main():
     llama3 = Llama(
-        # base="meta-llama/Meta-Llama-3.1-8B-Instruct",
-        # param_magnitude='8B',
-        # format=llama3format,
-        # temperature=0.6,
-        # sampled_generation=True,
-        # repetition_penalty=1.0,
-        # tokenizer_reponame="meta-llama/Meta-Llama-3.1-8B-Instruct"
+        base="meta-llama/Meta-Llama-3.1-8B-Instruct",
+        param_magnitude='8B',
+        format=llama3format,
+        temperature=0.6,
+        sampled_generation=True,
+        repetition_penalty=1.0,
+        tokenizer_reponame="meta-llama/Meta-Llama-3.1-8B-Instruct"
     )
-    response = llama3.generate('What is the capital of France?')
+    response = llama3.generate(['''A: i am looking for a museum in the centre of town.
+B: i will recommend primavera museum. their entrance fee is free and you can reach them on 01223357708
+A: what is their address?
+B: the address is 10 king s parade. do you need directions?
+A: just the postcode would help and i also will need a place to stay.
+B: the postcode is cb21s. where in town were you looking to stay?
+A: i would like to stay in the centre are there any expensive hotel -s?
+B: university arms hotel, 4 star rating located on regent street. phone number is 01223351241. would you like a reservation?
+A: no thank you i just wanted to get that information.
+
+Identify the information from the above dialogue:
+hotel stars: The rating or number of stars of the hotel [0, 1, 2, 3, 4, 5, any]?''', "What is the capital of France?"])
     print('Response:', response)
 
 if __name__ == '__main__':
