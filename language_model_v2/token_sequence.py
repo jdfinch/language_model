@@ -22,7 +22,78 @@ def _imports(): pass
 default: T.Any = object()
 
 
-class TokenSequence:
+def WrapTokenizer(tokenizer: PreTrainedTokenizer):
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = '-'
+        tokenizer.pad_token_id, = tokenizer.encode('-', add_special_tokens=False)
+    class TokenSequence(TokenSequenceBase): pass
+    TokenSequence.tokenizer = tokenizer
+    class TokenTemplate(TokenTemplateBase): pass
+    TokenTemplate.tokenizer = tokenizer
+    TokenTemplate.TokenSequence = TokenSequence
+    return TokenSequence, TokenTemplate
+
+
+
+class TokenSequenceBase:
+    tokenizer: PreTrainedTokenizer = None
+    _display_width = 80
+    _display_token_colors = ((40, 25, 65), (65, 25, 35), (25, 45, 65))
+    _display_padding_color = ('black',)
+    _display_foreground_color = (150, 150, 150)
+    _display_label_color = (255, 255, 255)
+    _display_slot_color = (80, 60, 30)
+
+    def __init__(
+        self,
+        *sequence: str | T.Iterable[Token],
+        is_attended: bool = default,
+        is_label: bool = default,
+    ):
+        self.tokens: list[Token] = []
+        """Tokens as (id, str, is_attended, is_label) tuples."""
+        for sequence in sequence:
+            if isinstance(sequence, TokenSequenceBase):
+                self.tokens.extend(sequence.tokens)
+            elif isinstance(sequence, str):
+                token_ids = self.tokenizer.encode(sequence, add_special_tokens=False)
+                self.tokens.extend(
+                    Token(
+                        token_id,
+                        self.tokenizer.decode(token_id),
+                        True if is_attended is default else is_attended,
+                        False if is_label is default else is_label
+                    )
+                    for token_id in token_ids)
+            else:
+                self.tokens.extend(sequence)
+
+    def text(self):
+        return ''.join(t.text if isinstance(t, Token) else t.as_text() for t in self) # noqa
+
+    def __iter__(self):
+        return iter(self.tokens)
+
+    def __len__(self):
+        return len(self.tokens)
+
+    def __getitem__(self, item):
+        return self.tokens[item]
+
+    def __str__(self):
+        if len(self) > 10:
+            return f'<TokenSequence len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens[:10])}|...>' # noqa
+        else:
+            return f'<TokenSequence len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens)}>' # noqa
+
+    def __repr__(self):
+        return str(self)
+
+    def display(self):
+        return display_tokens(self)
+
+
+class TokenTemplateBase:
     _slot_pattern = re.compile(r"#\[([a-z_A-Z0-9]+=[^,\]]*(?:, ?[a-z_A-Z0-9]+=[^,\]]*)*)]#")
     _display_width = 80
     _display_token_colors = ((40, 25, 65), (65, 25, 35), (25, 45, 65))
@@ -31,9 +102,10 @@ class TokenSequence:
     _display_label_color = (255, 255, 255)
     _display_slot_color = (80, 60, 30)
     tokenizer: PreTrainedTokenizer = None
+    TokenSequence = TokenSequenceBase
 
     def __init__(self,
-        *sequence: str |'TokenSequence' | 'TokenSlot' | T.Iterable[Token|TokenSlot],
+        *sequence: str | 'TokenTemplateBase' | 'TokenSlot' | T.Iterable[Token | TokenSlot],
         is_attended: bool = default,
         is_label: bool = default,
     ):
@@ -41,7 +113,7 @@ class TokenSequence:
         """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
         self.slots: dict[str, TokenSlot] = {}
         for sequence in sequence:
-            if isinstance(sequence, TokenSequence):
+            if isinstance(sequence, TokenTemplateBase):
                 self.tokens.extend(sequence.tokens)
             elif isinstance(sequence, str):
                 while sequence:
@@ -82,13 +154,13 @@ class TokenSequence:
                 self.tokens.extend(sequence)
 
     def fill(self,
-        slots: dict[str, str | 'TokenSequence'] | T.Iterable[str, str | 'TokenSequence'],
+        slots: dict[str, str | 'TokenTemplateBase'] | T.Iterable[str, str | 'TokenTemplateBase'],
         max_length: int = None,
         min_length: int = None,
     ):
         assert all(slot in self.slots for slot in slots), \
             f"Slots {set(slots) - set(self.slots)} not found in TokenSequence."
-        slot_subseqs: list[tuple[TokenSlot, TokenSequence]] = []
+        slot_subseqs: list[tuple[TokenSlot, TokenTemplateBase]] = []
         filled = []
         previous_splitter = 0
         for slot_name, text in slots.items():
@@ -129,7 +201,7 @@ class TokenSequence:
             pad_length = min_length - len(filled)
             padding = [Token(self.tokenizer.pad_token_id, self.tokenizer.pad_token, False, False)] * pad_length
             filled = padding + filled
-        return TokenSequence(filled)
+        return self.TokenSequence(filled)
 
     def text(self):
         return ''.join(t.text if isinstance(t, Token) else t.as_text() for t in self)
@@ -145,45 +217,46 @@ class TokenSequence:
 
     def __str__(self):
         if len(self) > 10:
-            return f'<TokenSequence len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens[:10])}|...>'
+            return f'<TokenTemplate len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens[:10])}|...>'
         else:
-            return f'<TokenSequence len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens)}>'
+            return f'<TokenTemplate len {len(self)}: {"|".join(t.text if isinstance(t, Token) else t.as_text() for t in self.tokens)}>'
 
     def __repr__(self):
         return str(self)
 
-    def display(self, verbose_slots=False):
-        num_slots = len(self.slots)
-        num_tokens = len(self) - num_slots
-        if num_slots > 0:
-            print(f"TokenSequence with {num_tokens} tokens and {num_slots} slots:")
+    def display(self):
+        return display_tokens(self)
+
+
+def display_tokens(seq: TokenSequenceBase | TokenTemplateBase):
+    num_slots = len(seq.slots) if hasattr(seq, 'slots') else 0
+    num_tokens = len(seq) - num_slots
+    if num_slots > 0:
+        print(f"{seq.__class__.__name__} with {num_tokens} tokens and {num_slots} slots:")
+    else:
+        print(f"{seq.__class__.__name__} with {num_tokens} tokens:")
+    display_tokens = []
+    for token, token_background_color in zip(seq, it.cycle(seq._display_token_colors)):
+        if isinstance(token, TokenSlot):
+            token_text = f'#[{token.name}]#'
+            token = Token(-1, token_text, True, bool(isinstance(token, OutputTokenSlot)))
+            token_text = f"{ansi.color(*seq._display_slot_color).bg}{token_text}{ansi.reset}"
         else:
-            print(f"TokenSequence with {num_tokens} tokens:")
-        display_tokens = []
-        for token, token_background_color in zip(self, it.cycle(self._display_token_colors)):
-            if isinstance(token, TokenSlot):
-                if verbose_slots:
-                    token_text = f'#[{token.name}]#'
-                else:
-                    token_text = f'#[{token.name}]#'
-                token = Token(-1, token_text, True, bool(isinstance(token, OutputTokenSlot)))
-                token_text = f"{ansi.color(*self._display_slot_color).bg}{token_text}{ansi.reset}"
-            else:
-                token_text = token.text
-                newlinestripped = token_text.rstrip('\n')
-                num_newlines = len(token_text) - len(newlinestripped)
-                if num_newlines > 0:
-                    token_text = ''.join((newlinestripped, "\\n" * num_newlines, ansi.reset, '\n'*num_newlines))
-            display_tokens.append(ansi.color(*token_background_color).bg)
-            if token.is_label:
-                display_tokens.append(ansi.color(*self._display_label_color).fg)
-            elif token.is_attended:
-                display_tokens.append(ansi.color(*self._display_foreground_color).fg)
-            else:
-                display_tokens.append(ansi.color(*self._display_padding_color).fg)
-            display_tokens.append(token_text)
-        display_tokens.append(ansi.reset)
-        print(''.join(display_tokens), end='\n\n')
+            token_text = token.text
+            newlinestripped = token_text.rstrip('\n')
+            num_newlines = len(token_text) - len(newlinestripped)
+            if num_newlines > 0:
+                token_text = ''.join((newlinestripped, "\\n" * num_newlines, ansi.reset, '\n'*num_newlines))
+        display_tokens.append(ansi.color(*token_background_color).bg)
+        if token.is_label:
+            display_tokens.append(ansi.color(*seq._display_label_color).fg)
+        elif token.is_attended:
+            display_tokens.append(ansi.color(*seq._display_foreground_color).fg)
+        else:
+            display_tokens.append(ansi.color(*seq._display_padding_color).fg)
+        display_tokens.append(token_text)
+    display_tokens.append(ansi.reset)
+    print(''.join(display_tokens), end='\n\n')
 
 
 def _tokenclasses(): pass
@@ -246,14 +319,11 @@ def main():
 
     #[output=my_output, trunc_side=left, max=7, min=3]#<|eot_id|>
     """).strip()
-    print(OutputTokenSlot('lorem ipsum'))
+
     from transformers import AutoTokenizer
     llama_tokenizer = AutoTokenizer.from_pretrained('meta-llama/Meta-Llama-3.1-8B-Instruct')
-    llama_tokenizer.pad_token = '-'
-    llama_tokenizer.pad_token_id, = llama_tokenizer.encode('-', add_special_tokens=False)
-    class LlamaTokenSequence(TokenSequence):
-        tokenizer = llama_tokenizer
-    template_sequence = LlamaTokenSequence(template)
+    LlamaTokenSequence, LlamaTokenTemplate = WrapTokenizer(llama_tokenizer)
+    template_sequence = LlamaTokenTemplate(template)
     template_sequence.display()
     filled_sequence = template_sequence.fill(
         dict(my_input="What is the capital of France?", my_output="The capital of France is Paris."),
