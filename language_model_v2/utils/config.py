@@ -12,8 +12,7 @@ import typing as T
 def config(cls=None, **kwargs):
     if cls is None:
         return ft.partial(config, **kwargs)
-    if not dc.is_dataclass(cls):
-        cls = dc.dataclass(cls)
+    cls = dc.dataclass(cls)
     init = getattr(cls, '__init__', lambda self: None)
     init_sig = ins.signature(init)
     def __init__(self, *args, **kwargs):
@@ -27,8 +26,7 @@ def config(cls=None, **kwargs):
         init(self, *args, **kwargs) # noqa
         del self.__config__
         del self.__default__
-    if init.__qualname__ != __init__.__qualname__:
-        cls.__init__ = __init__
+    cls.__init__ = __init__
     return cls
 
 class Config:
@@ -50,6 +48,13 @@ if __name__ == '__main__':
             print(f'{self.__config__ = }')
             print(f'{self.__default__ = }')
 
+
+    @dataclass
+    class B(A):
+        z: list[str] = dc.field(default_factory=lambda: [1, 2, 3])
+
     a = A(1, y=2)
     print(f'{a = }')
     print(f'{vars(a) = }')
+    b = B(8)
+    print(f'{b = }')
