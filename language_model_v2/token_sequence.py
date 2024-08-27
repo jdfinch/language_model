@@ -26,10 +26,11 @@ default: T.Any = object()
 class TokenSequence(list):
     tokenizer: PreTrainedTokenizer = None
     _display_width = 80
-    _display_token_colors = ((40, 25, 65), (65, 25, 35), (25, 45, 65))
+    _display_token_colors = ((25, 20, 65), (0, 30, 60), (0, 40, 50))
     _display_padding_color = ('black',)
-    _display_foreground_color = (150, 150, 150)
+    _display_foreground_color = (200, 200, 200)
     _display_label_color = (255, 255, 255)
+    _display_label_style = ansi.bold
     _display_slot_color = (80, 60, 30)
 
     def __init__(
@@ -122,6 +123,12 @@ class TokenSequenceBatch(list):
     def __setitem__(self, key, value):
         raise NotImplementedError("TokenSequenceBatch should not be added to after construction.")
 
+    def __getitem__(self, item):
+        if isinstance(item, slice):
+            return self.__class__(list.__getitem__(self, item))
+        else:
+            return list.__getitem__(self, item)
+
     def dict(self, seq_type:type=list):
         return dict(
             input_ids=seq_type([[t[0] for t in s] for s in self]),
@@ -136,17 +143,18 @@ class TokenSequenceBatch(list):
 class TokenTemplate(list):
     _slot_pattern = re.compile(r"#\[([a-z_A-Z0-9]+=[^,\]]*(?:, ?[a-z_A-Z0-9]+=[^,\]]*)*)]#")
     _display_width = 80
-    _display_token_colors = ((40, 25, 65), (65, 25, 35), (25, 45, 65))
+    _display_token_colors = ((25, 20, 65), (0, 30, 60), (0, 40, 50))
     _display_padding_color = ('black',)
-    _display_foreground_color = (150, 150, 150)
+    _display_foreground_color = (200, 200, 200)
     _display_label_color = (255, 255, 255)
+    _display_label_style = ansi.bold
     _display_slot_color = (80, 60, 30)
     tokenizer: PreTrainedTokenizer = None
     TokenSequence = TokenSequence
     TokenSequenceBatch = TokenSequenceBatch
 
     def __init__(self,
-        *sequence: str | 'TokenTemplate' | 'TokenSlot' | T.Iterable[tuple | TokenSlot],
+        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple | TokSlot],
         is_attended: bool = default,
         is_label: bool = default,
         tokenizer: PreTrainedTokenizer = None,
@@ -155,7 +163,7 @@ class TokenTemplate(list):
             self.tokenizer = tokenizer
         list.__init__(self)
         """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
-        self.slots: dict[str, TokenSlot] = {}
+        self.slots: dict[str, TokSlot] = {}
         for sequence in sequence:
             if isinstance(sequence, TokenTemplate):
                 list.extend(self, sequence)
@@ -183,16 +191,16 @@ class TokenTemplate(list):
                             for argument in match.group(1).split(','))
                         if 'input' in arguments:
                             arguments['name'] = arguments.pop('input') # noqa
-                            slot = InputTokenSlot(**arguments, index=len(self))
+                            slot = TokIn(**arguments, index=len(self))
                         elif 'output' in arguments:
                             arguments['name'] = arguments.pop('output')
-                            slot = OutputTokenSlot(**arguments, index=len(self))
+                            slot = TokOut(**arguments, index=len(self))
                         else:
                             raise ValueError(f"Slot be named using input= or output=, but got {arguments}")
                         assert slot.name not in self.slots, f"Duplicate slot name {slot.name} detected when constructing TokenSequence."
                         self.slots[slot.name] = slot
                         list.append(self, slot)
-            elif isinstance(sequence, TokenSlot):
+            elif isinstance(sequence, TokSlot):
                 list.append(self, sequence)
             else:
                 list.extend(self, sequence)
@@ -317,9 +325,9 @@ def display_tokens(seq: TokenSequence | TokenTemplate):
         print(f"{seq.__class__.__name__} with {num_tokens} tokens:")
     display_tokens = []
     for token, token_background_color in zip(seq, it.cycle(seq._display_token_colors)):
-        if isinstance(token, TokenSlot):
+        if isinstance(token, TokSlot):
             token_text = f'#[{token.name}]#'
-            token = (-1, True, bool(isinstance(token, OutputTokenSlot)))
+            token = (-1, True, bool(isinstance(token, TokOut)))
             token_text = f"{ansi.color(*seq._display_slot_color).bg}{token_text}{ansi.reset}"
         else:
             token_text = seq.tokenizer.decode(token[0])
@@ -330,12 +338,13 @@ def display_tokens(seq: TokenSequence | TokenTemplate):
         display_tokens.append(ansi.color(*token_background_color).bg)
         if token[2]:
             display_tokens.append(ansi.color(*seq._display_label_color).fg)
+            display_tokens.append(seq._display_label_style)
         elif token[1]:
             display_tokens.append(ansi.color(*seq._display_foreground_color).fg)
         else:
             display_tokens.append(ansi.color(*seq._display_padding_color).fg)
         display_tokens.append(token_text)
-    display_tokens.append(ansi.reset)
+        display_tokens.append(ansi.reset)
     print(''.join(display_tokens), end='\n\n')
 
 
@@ -343,7 +352,7 @@ def _tokenclasses(): pass
 
 
 @dataclass
-class TokenSlot(Config):
+class TokSlot(Config):
     name: str
     max: int = None
     min: int = 0
@@ -364,18 +373,33 @@ class TokenSlot(Config):
         else:
             raise ValueError(f"trunc_side must be a prefix of 'LEFT' or 'RIGHT', not {trunc_side}")
         self.trunc_rank = float(self.trunc_rank)
-        self.is_label = bool(self.is_label)
+        self.is_label = (self.is_label and isinstance(self.is_label, bool)
+                         or not 'false'.startswith(str(self.is_label).lower()))
+        self.eos = None if self.eos in (None, 'None') else self.eos
 
     def as_text(self):
         return f"#[{self.name}]#"
 
+    def __str__(self):
+        if isinstance(self, TokIn):
+            kind = 'input'
+        elif isinstance(self, TokOut):
+            kind = 'output'
+        else:
+            kind = 'name'
+        fields = ''.join(f", {k}={v}" for k, v in self.__dict__.items() if k not in ('name', 'index'))
+        return f"#[{kind}={self.name}{fields}]#"
+
+    def __repr__(self):
+        return str(self)
+
 
 @dataclass
-class InputTokenSlot(TokenSlot):
+class TokIn(TokSlot):
     pass
 
 @dataclass
-class OutputTokenSlot(TokenSlot):
+class TokOut(TokSlot):
     trunc_side: str = 'R'
     trunc_rank: float = 0.0
     is_label: bool = True
@@ -405,19 +429,21 @@ def create_token_sequence_factories(tokenizer: PreTrainedTokenizer,
 
 def main():
     import textwrap as tw
-    template = tw.dedent("""
+    template = tw.dedent(f"""
     <|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
     You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
 
-    #[input=my_input, max=1024]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    {TokIn('my_input')}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
-    #[output=my_output, max=1024]#
+    {TokOut('my_output', max=8)}||FormatTEST.
     """).strip()
 
+    print(template, '\n\n')
+
     data = [
-        dict(my_input="What is the capital of France?"*100, my_output="The capital of France is Paris."),
-        dict(my_input="What is the capital of the United States of America (USA)?", my_output="The capital of the United States of America is Washington, D.C."*100)
+        dict(my_input="What is the capital of France?", my_output="The capital of France is Paris."),
+        dict(my_input="What is the capital of the United States of America (USA)?", my_output="The capital of the United States of America is Washington, D.C.")
     ]
 
     import time
@@ -443,7 +469,7 @@ def main():
         for _ in range(num_batches):
             filled_sequence = template_sequence.fill(data, max_length=1024)
             input_to_llm = filled_sequence.dict(seq_type=pt.LongTensor)
-    filled_sequence[0].display()
+    filled_sequence[:2].display()
     return
 
 
