@@ -35,7 +35,7 @@ class TokenSequence(list):
 
     def __init__(
         self,
-        sequence: str | T.Iterable[tuple],
+        *sequence: str | T.Iterable[tuple[int, bool, bool]],
         is_attended: bool = default,
         is_label: bool = default,
         tokenizer: PreTrainedTokenizer = None,
@@ -45,11 +45,12 @@ class TokenSequence(list):
         list.__init__(self)
         if is_attended is default: is_attended = True
         if is_label is default: is_label = False
-        if isinstance(sequence, str):
-            token_ids = self.tokenizer.encode(sequence, add_special_tokens=False)
-            list.extend(self, ((token_id, is_attended, is_label) for token_id in token_ids))
-        else:
-            list.extend(self, sequence)
+        for sequence in sequence:
+            if isinstance(sequence, str):
+                token_ids = self.tokenizer.encode(sequence, add_special_tokens=False)
+                list.extend(self, ((token_id, is_attended, is_label) for token_id in token_ids))
+            else:
+                list.extend(self, sequence)
 
     def __getitem__(self, item):
         if isinstance(item, slice):
@@ -154,7 +155,7 @@ class TokenTemplate(list):
     TokenSequenceBatch = TokenSequenceBatch
 
     def __init__(self,
-        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple | TokSlot],
+        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | TokSlot],
         is_attended: bool = default,
         is_label: bool = default,
         tokenizer: PreTrainedTokenizer = None,
@@ -454,7 +455,7 @@ def main():
         t1 = time.perf_counter()
         yield
         t2 = time.perf_counter()
-        print(f"{label} took {t2 - t1:.3f} seconds.")
+        print(f"{label} took {t2 - t1:.3f} seconds.\n")
 
     import torch as pt
     from transformers import AutoTokenizer
@@ -464,7 +465,7 @@ def main():
     template_sequence.display()
     batch_size = 128
     data = data * (batch_size // len(data))
-    num_batches = 100
+    num_batches = 1000
     with timer("Filling token sequences"):
         for _ in range(num_batches):
             filled_sequence = template_sequence.fill(data, max_length=1024)
