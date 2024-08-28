@@ -2,96 +2,163 @@
 
 import transformers as tf
 import torch as pt
-from pprint import pp
+import textwrap as tw
 import pathlib as pl
 import json
-from language_model_v2.utils.settings import settings # noqa
+from language_model_v2.utils.config import config, Config
 from language_model_v2.utils.default import default
 import language_model_v2.llama3_format as llama3format
+import language_model_v2.tokens as tok
 
-from dataclasses import dataclass as settings; vars().update(settings=settings)
+def _imports(): pass
+
+# Black magic type hinting
+from dataclasses import dataclass; vars().update(dataclass=config)
+
+config_file_name = 'emory_config.json'
 
 
-@settings
-class LlamaHypers:
-    settings = {}
-    """Hyperparameters that were passed to the constructor. Used internally to override loaded hyperparameters."""
+@dataclass
+class LlamaHypers(Config):
     base: str = "meta-llama/Meta-Llama-3.1-{param_magnitude}-Instruct"
     """The base model repository ID. If no model_to_load is specified, the base will be loaded from this ID."""
     model_to_load: str = None
     """Path to a custom model to load. The base will be used instead if this is None."""
-    tokenizer_repo_id: str = None
-    """The repository ID of the tokenizer to use. If None, the tokenizer will be loaded from the base ID."""
-    param_magnitude: str|None = '8B'
+    param_magnitude: str | None = '8B'
     """The magnitude of the model parameters, replacing {param_magnitude} in the base."""
-    checkpoint_to_load: str|None = None
-    """Path to a specific checkpoint to load. This overrides base and model_to_load to resume training from a specific checkpoint, including the optimizer state."""
-    quantization: str|None = 'int8'
-    """Quantization mode to use. If None, no quantization will be used (16 bit half-precision)."""
-    lora: int|None = 8
-    """The LoRA rank to use. If None, no LoRA adapter be used at all."""
-    lora_modules: tuple[str] = ('embed_tokens', 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj', 'lm_head')
-    """The modules to apply LoRA adapters to. Modules must be names from model architecture and can be found using print(model.model)"""
-    lora_alpha: float|None = None
-    """The alpha value to use for LoRA. If None, the alpha will be set to 2*lora (recommended)."""
-    lora_dropout: float|None = None
-    """The dropout rate to use for LoRA (or None)."""
     lora_merge_on_load: bool = False
     """Whether to merge the LoRA adapter into the original model weights on load."""
-    gradient_checkpointing: bool = True
-    """Whether to use gradient checkpointing to reduce memory usage."""
-    epochs: int|float = 1
+    quantization: str | None = 'int8'
+    """Quantization mode to use. If None, no quantization will be used (16 bit half-precision)."""
+    lora: int | None = 8
+    """The LoRA rank to use. If None, no LoRA adapter be used at all."""
+    lora_modules: tuple[str] = (
+    'embed_tokens', 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj', 'lm_head')
+    """The modules to apply LoRA adapters to. Modules must be names from model architecture and can be found using print(model.model)"""
+    lora_alpha: float | None = None
+    """The alpha value to use for LoRA. If None, the alpha will be set to 2*lora (recommended)."""
+    lora_dropout: float | None = None
+    """The dropout rate to use for LoRA (or None)."""
+    format: str = tw.dedent(
+        f"""
+        <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+        You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+        {tok.TokIn()}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+        {tok.TokOut()}"""
+    ).lstrip()
+    max_sequence_length: int = 1024
+    """The maximum token length of sequences the model trains on or can be fed as input for generation."""
+    max_output_length: int = 512
+    """The maximum number of tokens the model will generate."""
+    epochs: int | float = 1
     """The number of epochs to train for. If a float, the model will train for that fraction of the dataset."""
     train_batch_size: int = 1
     """The effective batch size to use for training. Divide by gradient_accumulation_steps to get the actual batch size used on the hardware. The actual_train_batch_size property can be used to get the real batch size as well."""
-    gradient_accumulation_steps: int = 1
-    """..."""
-    save_checkpoint_every_x_epochs: float = 1.0
-    clean_up_checkpoint_after_training: bool = True
-    learning_rate: float = 2e-4
+    learning_rate: float = 1e-2
+    """The learning rate to use for training."""
     optimizer: str = 'adafactor'
+    """The optimizer to use for training."""
     warmup_steps: int = 0
-    clip_gradient_norm: float = 1.0
+    """The number of warmup steps to use for the learning rate scheduler."""
+    max_gradient_norm: float|None = 1.0
+    """The maximum gradient norm to clip to."""
     weight_decay: float = 0.0
+    """The weight decay to use for training."""
     scheduler_type: str = 'constant'
-    train_on_s2s_inputs: bool = False
-    format: str = ''''''
-    max_sequence_length: int = 1024
-    protected_input_length: int = 512
-    max_output_length: int = 512
+    """The type of learning rate scheduler to use."""
     repetition_penalty: float = 1.2
+    """The repetition penalty to use for generation."""
     num_beams: int = 1
+    """The number of beams to use for generation."""
     temperature: float = 0.6
+    """The temperature to use for generation."""
     sampled_generation: bool = False
+    """Whether to use sampled generation instead of beam search."""
     top_p: float = 0.9
+    """The top-p value to use for generation."""
     top_k: int = 50
-    gen_batch_size: int = 1
-    ppl_batch_size: int = 1
-    dynamic_tokenization: bool = True
-
-    def actual_train_batch_size(self):
-        return self.train_batch_size // self.gradient_accumulation_steps
+    """The top-k value to use for generation."""
 
     def __post_init__(self):
-        if str(self.param_magnitude):
+        if self.param_magnitude:
             self.base = self.base.format(param_magnitude=str(self.param_magnitude))
         if self.model_to_load is None:
             self.model_to_load = self.base
 
 
-class Llama(LlamaHypers):
+@dataclass
+class LlamaConfig(LlamaHypers):
+    tokenizer_repo_id: str = None
+    """The repository ID of the tokenizer to use. If None, the tokenizer will be loaded from the base ID."""
+    checkpoint_to_load: str|None = None
+    """Path to a specific checkpoint to load. This overrides base and model_to_load to resume training from a specific checkpoint, including the optimizer state."""
+    gradient_checkpointing: bool = True
+    """Whether to use gradient checkpointing to reduce memory usage."""
+    gradient_accumulation_steps: int = 1
+    """The number of actual batches sent to hardware to accumulate gradients over before updating the model."""
+    save_checkpoint_every_x_epochs: float = 1.0
+    """The frequency to save checkpoints, in epochs."""
+    clean_up_checkpoint_after_training: bool = True
+    """Whether to clean up checkpoints after training."""
+    gen_batch_size: int = 1
+    """The batch size to use for generation."""
+    ppl_batch_size: int = 1
+    """The batch size to use for perplexity calculation."""
+    dynamic_tokenization: bool = True
+    """Whether to dynamically send tokens to GPU batch-by-batch to save on memory usage."""
+
+    def actual_train_batch_size(self):
+        return self.train_batch_size // self.gradient_accumulation_steps
+
     def __post_init__(self):
-        LlamaHypers.__post_init__(self)
-        assert self.protected_input_length < self.max_sequence_length, \
-            f"Protected input length {self.protected_input_length} must not exceed max sequence length {self.max_sequence_length}"
-        if pl.Path(self.base).exists() and (pl.Path(self.base) / 'hyperparameters.json').exists():
-            loaded_hyperparams: dict = json.loads((pl.Path(self.base) / 'hyperparameters.json').read_text())
-            specified_hyperparameters = vars(self).pop('settings')
-            hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
-            vars(self).update(hyperparameters)
-        self.hyperparameters: dict = dict(vars(self))
-        tokenizer_reponame = "meta-llama/Llama-2-7b-chat-hf"
-        self.tokenizer = tf.AutoTokenizer.from_pretrained(tokenizer_reponame, trust_remote_code=True)
+        super().__post_init__()
+        if self.tokenizer_repo_id is None:
+            self.tokenizer_repo_id = self.base
+
+
+class Llama(LlamaConfig):
+    def __post_init__(self):
+        # Load config from file if specified, overriding loaded args with args passed to constructor
+        if self.model_to_load is not None:
+            model_to_load_path = pl.Path(self.model_to_load).expanduser()
+            if model_to_load_path.exists():
+                loaded_config = json.loads((model_to_load_path / config_file_name).read_text())
+                specified_config = self.__config__
+                merged_config = loaded_config | specified_config
+                vars(self).update(merged_config)
+        # Config post init responsible for dynamically filling in any missing params with defaults
+        super().__post_init__()
+        # Set up tokenizer as factories that reference the base tokenizer
+        tokenizer = tf.AutoTokenizer.from_pretrained(self.tokenizer_repo_id, trust_remote_code=True)
+        self.TokTemplate, self.TokSeq, self.TokBatch = tok.create_token_sequence_factories(tokenizer)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import time
 import os
