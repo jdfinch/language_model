@@ -122,7 +122,7 @@ class TokenSequence(_DisplaySettings, list):
 
     def __getitem__(self, item):
         if isinstance(item, slice):
-            return self.__class__(list.__getitem__(self, item))
+            return self.__class__(list.__getitem__(self, item), tokenizer=self.tokenizer)
         else:
             return list.__getitem__(self, item)
 
@@ -153,7 +153,10 @@ class TokenSequenceBatch(list):
     def __init__(self,
         *sequences: T.Iterable[TokenSequence|str],
         tokenizer: PreTrainedTokenizer = None,
+        min_length:int|None=None,
         pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
     ):
         self.tokenizer = tokenizer
         list.__init__(self)
@@ -167,12 +170,18 @@ class TokenSequenceBatch(list):
                 seqs.extend(seq if isinstance(seq, TokenSequence) else TokenSequence(seq, tokenizer=self.tokenizer) 
                     for seq in sequence)
         if pad_to_same_length:
-            max_len = max(len(seq) for seq in seqs)
+            pad_to_length = max(min_length or 0, *[len(seq) for seq in seqs])
+            remainder = pad_to_length % pad_to_multiple_of
+            pad_to_mult = pad_to_multiple_of - remainder if remainder else 0
+            pad_to_length += pad_to_mult
+            pad = [(self.tokenizer.pad_token_id, False, False)]
             for seq in seqs:
-                if len(seq) < max_len:
-                    pad = [(self.tokenizer.pad_token_id, False, False)]
-                    padding = pad * (max_len - len(seq))
-                    seq = TokenSequence(padding + seq, tokenizer=self.tokenizer)
+                if len(seq) < pad_to_length:
+                    padding = pad * (pad_to_length - len(seq))
+                    if pad_side[0] == 'L':
+                        seq = TokenSequence(padding + seq, tokenizer=self.tokenizer)
+                    else:
+                        seq = TokenSequence(seq + padding, tokenizer=self.tokenizer)
                 list.append(self, seq)
         else:
             list.extend(self, seqs)
@@ -188,7 +197,11 @@ class TokenSequenceBatch(list):
 
     def __getitem__(self, item):
         if isinstance(item, slice):
-            return self.__class__(list.__getitem__(self, item))
+            return self.__class__(
+                list.__getitem__(self, item),
+                tokenizer=self.tokenizer,
+                pad_to_same_length=False,
+                pad_to_multiple_of=1)
         else:
             return list.__getitem__(self, item)
 
@@ -259,7 +272,7 @@ class TokenTemplate(_DisplaySettings, list):
 
     def __getitem__(self, item):
         if isinstance(item, slice):
-            return self.__class__(list.__getitem__(self, item))
+            return self.__class__(list.__getitem__(self, item), tokenizer=self.tokenizer)
         else:
             return list.__getitem__(self, item)
 
@@ -268,16 +281,20 @@ class TokenTemplate(_DisplaySettings, list):
         max_length: int = None,
         min_length: int = None,
         pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
     ) -> T.Union['TokenSequence', 'TokenSequenceBatch']:
         if isinstance(slots, dict):
-            return self._fill_single(slots, max_length, min_length)
+            return self._fill_single(slots, max_length, min_length, pad_to_multiple_of, pad_side)
         else:
-            return self._fill_batch(slots, max_length, min_length, pad_to_same_length)
+            return self._fill_batch(slots, max_length, min_length, pad_to_same_length, pad_to_multiple_of, pad_side)
 
     def _fill_single(self,
         slots: dict[str, str | 'TokenSequence'],
         max_length: int = None,
         min_length: int = None,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
     ):
         assert all(slot in self.slots for slot in slots), \
             f"Slots {set(slots) - set(self.slots)} not found in TokenSequence."
@@ -329,8 +346,16 @@ class TokenTemplate(_DisplaySettings, list):
         filled.extend(self[previous_splitter:])
         if min_length is not None and len(filled) < min_length:
             pad_length = min_length - len(filled)
+            remainder = pad_length % pad_to_multiple_of
+            pad_to_mult = pad_to_multiple_of - remainder if remainder else 0
+            if pad_to_mult and len(filled) + pad_length + pad_to_mult < min_length:
+                pad_length += pad_to_mult
             padding = [(self.tokenizer.pad_token_id, False, False)] * pad_length
-            filled = padding + filled
+            if pad_side[0] == 'L':
+                padding.extend(filled)
+                filled = padding
+            else:
+                filled.extend(padding)
         return TokenSequence(filled, tokenizer=self.tokenizer)
 
     def _fill_batch(self,
@@ -338,11 +363,17 @@ class TokenTemplate(_DisplaySettings, list):
         max_length: int = None,
         min_length: int = None,
         pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
     ):
         return TokenSequenceBatch(
-            [self._fill_single(slots_, max_length, min_length) for slots_ in slots],
+            [self._fill_single(slots_, max_length, min_length=None, pad_to_multiple_of=1)
+                for slots_ in slots],
             tokenizer=self.tokenizer,
-            pad_to_same_length=pad_to_same_length)
+            min_length=min_length,
+            pad_to_same_length=pad_to_same_length,
+            pad_to_multiple_of=pad_to_multiple_of,
+            pad_side=pad_side)
 
     def text(self):
         return ''.join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self)
