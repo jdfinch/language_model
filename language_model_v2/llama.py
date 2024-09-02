@@ -38,7 +38,7 @@ class LlamaHypers(Config):
     lora: int | None = 2
     """The LoRA rank to use. If None, no LoRA adapter be used at all."""
     lora_applied_to: tuple[str] = (
-    'embed_tokens', 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj', 'lm_head')
+        'embed_tokens', 'q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj', 'lm_head')
     """The modules to apply LoRA adapters to. Modules must be names from model architecture and can be found using print(model.model)"""
     lora_alpha: float | None = None
     """The alpha value to use for LoRA. If None, the alpha will be set to 2*lora (recommended)."""
@@ -56,7 +56,7 @@ class LlamaHypers(Config):
 
         {tok.TokOut()}"""
     ).lstrip()
-    """The format to use for training and generation. Use TokIn and TokOut objects to specify slots for input and output sequences (or just specify slots like #[input=myinput, trunc_side=L, trunc_rank=1.0, is_label=False]# and customize truncation for sequences exceeding the max_sequence_length. When training and generating, data is passed in to fill slots in this format template."""
+    """The format to use for training and generation. Use TokIn and TokOut objects to specify slots for input and output sequences (or just specify slots like #[input=myinput, trunc_side=L, trunc_rank=1.0]# or #[output=myoutput, max=50, min=20]# and customize truncation for sequences exceeding the max_sequence_length. When training and generating, data is passed in to fill slots in this format template."""
     max_sequence_length: int = 1024
     """The maximum token length of sequences the model trains on or can be fed as input for generation."""
     max_output_length: int = 512
@@ -69,7 +69,7 @@ class LlamaHypers(Config):
     """The learning rate to use for training."""
     optimizer: str = 'adafactor'
     """The optimizer to use for training."""
-    warmup_steps: int = 0
+    warmup_steps: int = 16
     """The number of warmup steps to use for the learning rate scheduler."""
     max_gradient_norm: float|None = 1.0
     """The maximum gradient norm to clip to."""
@@ -93,8 +93,15 @@ class LlamaHypers(Config):
     """The repository ID of the tokenizer to use. If None, the tokenizer will be loaded from the base ID."""
 
     def __post_init__(self):
+        # apply rules for specification of what model and tokenizer should be loaded
+        if '{param_magnitude}' in self.base:
+            self.base = self.base.format(param_magnitude=str(self.param_magnitude))
+        if self.model_to_load is None:
+            self.model_to_load = self.base
+        if self.tokenizer_repo_id is None:
+            self.tokenizer_repo_id = self.base
         # Load config from file if specified, overriding loaded args with args passed to constructor
-        if self.model_to_load is not None:
+        if self.model_to_load != self.base:
             model_to_load_path = pl.Path(self.model_to_load).expanduser()
             if model_to_load_path.exists():
                 loaded_config = json.loads((model_to_load_path / 'emory_config.json').read_text())
@@ -118,13 +125,6 @@ class LlamaHypers(Config):
                         self.base = base
                     elif self.base != base:
                         raise ValueError(f"Model base {self.base} does not match loaded config base {base}")
-        # apply rules for specification of what model and tokenizer should be loaded
-        if '{param_magnitude}' in self.base:
-            self.base = self.base.format(param_magnitude=str(self.param_magnitude))
-        if self.model_to_load is None:
-            self.model_to_load = self.base
-        if self.tokenizer_repo_id is None:
-            self.tokenizer_repo_id = self.base
         # calculate default hyperparam values
         if self.lora_alpha is None:
             self.lora_alpha = 2 * self.lora # this heuristic has now been validated many times
@@ -147,24 +147,24 @@ class LlamaConfig(LlamaHypers):
     """Complete configuration for a Llama model, including implementation-level params."""
     checkpoint_to_load: str|None = None
     """Path to a specific checkpoint to load. This overrides base and model_to_load to resume training from a specific checkpoint, including the optimizer state."""
+    load_locally_saved_models_only: bool = False
+    """Whether to load models only from the local cache, not from the Hugging Face model hub."""
     gradient_checkpointing: bool = True
     """Whether to use gradient checkpointing to reduce memory usage."""
     physical_train_batch_size: int | None = 1
     """The actual batch size sent to hardware during training. Either this or gradient_accumulation_steps can be set, not both."""
     gradient_accumulation_steps: int|None = None
     """The number of times to acummulate gradients before updating the model (i.e. the actual batch size sent to hardware is train_batch_size / gradient_accumulation_steps). Either this or physical_train_batch_size can be set, not both."""
+    pad_side: str = 'L'
+    """The side to pad sequences on. 'L' for left, 'R' for right."""
     pad_to_multiple_of: int = 8
     """Pads sequences so that total sequence lengths are a multiple of this value, which can improve performance on GPU."""
-    save_checkpoint_every_x_epochs: float = 1.0
-    """The frequency to save checkpoints, in epochs."""
-    clean_up_checkpoint_after_training: bool = True
-    """Whether to clean up checkpoints after training."""
     gen_batch_size: int = None
     """The batch size to use for generation. Defaults to the actual train batch size."""
     ppl_batch_size: int = 1
     """The batch size to use for perplexity calculation."""
-    dynamic_tokenization: bool = True
-    """Whether to dynamically send tokens to GPU batch-by-batch to save on memory usage."""
+    send_tokens_to_gpu_by_batch: bool = True
+    """Whether to dynamically send tokens to GPU batch-by-batch to save on memory usage, or send all tokens to GPU at once (faster)."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -228,7 +228,16 @@ class Llama(LlamaConfig):
         self.tokenizer = tok.Tokenizer(self.tokenizer_repo_id) # wrapper around hf tokenizer
         self.model: hf.LlamaForCausalLM = hf.AutoModelForCausalLM.from_pretrained(
             self.model_to_load, **quantization_kwargs)
-        self.template = self.tokenizer.templatize(self.format)
+        self.template = self.tokenizer.templatize(
+            self.format,
+            max_length=self.max_sequence_length,
+            pad_to_same_length=True,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            pad_side=self.pad_side)
+
+
+    def save(self, path: str|pl.Path=None, save_as_checkpoint=False):
+        return super().save(path)
 
 
     def preprocess(self, data=None, /, **datas) -> tok.TokenSequence | T.Generator[tok.TokenSequence, None, None]:

@@ -38,8 +38,22 @@ class Tokenizer:
         *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'],
         is_attended: bool = default,
         is_label: bool = default,
+        max_length: int = None,
+        min_length: int = None,
+        pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
     ) -> 'TokenTemplate':
-        return TokenTemplate(*sequence, is_attended=is_attended, is_label=is_label, tokenizer=self.tokenizer)
+        return TokenTemplate(
+            *sequence,
+            is_attended=is_attended,
+            is_label=is_label,
+            max_length=max_length,
+            min_length=min_length,
+            pad_to_same_length=pad_to_same_length,
+            pad_to_multiple_of=pad_to_multiple_of,
+            pad_side=pad_side,
+            tokenizer=self.tokenizer)
     
     def tokenize(self, 
         *sequences: str | T.Iterable[tuple[int, bool, bool]] | T.Iterable[str | T.Iterable[tuple[int, bool, bool]]],
