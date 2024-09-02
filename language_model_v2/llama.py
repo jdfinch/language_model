@@ -12,7 +12,7 @@ from language_model_v2.utils.batch import batched, batching
 from language_model_v2.utils.peek import peek
 from language_model_v2.utils.default import default
 import language_model_v2.llama3_format as llama3format
-import language_model_v2.tokens as tok
+import language_model_v2.tokenizer as tok
 
 import typing as T
 
@@ -153,6 +153,8 @@ class LlamaConfig(LlamaHypers):
     """The actual batch size sent to hardware during training. Either this or gradient_accumulation_steps can be set, not both."""
     gradient_accumulation_steps: int|None = None
     """The number of times to acummulate gradients before updating the model (i.e. the actual batch size sent to hardware is train_batch_size / gradient_accumulation_steps). Either this or physical_train_batch_size can be set, not both."""
+    pad_to_multiple_of: int = 8
+    """Pads sequences so that total sequence lengths are a multiple of this value, which can improve performance on GPU."""
     save_checkpoint_every_x_epochs: float = 1.0
     """The frequency to save checkpoints, in epochs."""
     clean_up_checkpoint_after_training: bool = True

@@ -97,7 +97,7 @@ def display_tokens(seq: TokenSequence | TokenTemplate):
             display_tokens.append(ansi.color(*seq._display_padding_color).fg)
         display_tokens.append(token_text)
         display_tokens.append(ansi.reset)
-    print(''.join(display_tokens), end='\n\n')
+    return ''.join(display_tokens) + '\n\n'
 
 
 class TokenSequence(_DisplaySettings, list):
@@ -212,8 +212,7 @@ class TokenSequenceBatch(list):
             labels=seq_type([[t[0] if t[2] else -100 for t in s] for s in self]))
 
     def display(self):
-        for seq in self:
-            seq.display()
+        return '\n\n'.join(display_tokens(seq) for seq in self)
 
 
 class TokenTemplate(_DisplaySettings, list):
@@ -223,9 +222,21 @@ class TokenTemplate(_DisplaySettings, list):
         *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | TokSlot],
         is_attended: bool = default,
         is_label: bool = default,
+        max_length: int = None,
+        min_length: int = None,
+        pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
         tokenizer: PreTrainedTokenizer = None,
     ):
         self.tokenizer = tokenizer
+        self.is_attended = is_attended
+        self.is_label = is_label
+        self.max_length = max_length
+        self.min_length = min_length
+        self.pad_to_same_length = pad_to_same_length
+        self.pad_to_multiple_of = pad_to_multiple_of
+        self.pad_side = pad_side
         list.__init__(self)
         """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
         self.slots: dict[str, TokSlot] = {}
@@ -270,24 +281,73 @@ class TokenTemplate(_DisplaySettings, list):
             else:
                 list.extend(self, sequence)
 
+    def copy(self,
+        is_attended: bool = default,
+        is_label: bool = default,
+        max_length: int = default,
+        min_length: int = default,
+        pad_to_same_length: bool = default,
+        pad_to_multiple_of: int = default,
+        pad_side: str = default,
+        tokenizer: PreTrainedTokenizer = default,
+    ) -> 'TokenTemplate':
+        c = self.__class__(
+            [],
+            is_attended=self.is_attended if is_attended is default else is_attended,
+            is_label=self.is_label if is_label is default else is_label,
+            max_length=self.max_length if max_length is default else max_length,
+            min_length=self.min_length if min_length is default else min_length,
+            pad_to_same_length=self.pad_to_same_length if pad_to_same_length is default else pad_to_same_length,
+            pad_to_multiple_of=self.pad_to_multiple_of if pad_to_multiple_of is default else pad_to_multiple_of,
+            pad_side=self.pad_side if pad_side is default else pad_side,
+            tokenizer=self.tokenizer if tokenizer is default else tokenizer)
+        list.extend(c, self)
+        c.slots = dict(self.slots)
+        return c
+
     def __getitem__(self, item):
         if isinstance(item, slice):
-            return self.__class__(list.__getitem__(self, item), tokenizer=self.tokenizer)
+            copy = self.__class__(
+                list.__getitem__(self, item),
+                is_attended=self.is_attended,
+                is_label=self.is_label,
+                max_length=self.max_length,
+                min_length=self.min_length,
+                pad_to_same_length=self.pad_to_same_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side,
+                tokenizer=self.tokenizer)
+            copy.slots = dict(self.slots)
+            return copy
         else:
             return list.__getitem__(self, item)
 
     def fill(self,
-        slots: dict[str, str | 'TokenSequence'] | T.Iterable[dict[str, str | 'TokenSequence']],
-        max_length: int = None,
-        min_length: int = None,
-        pad_to_same_length: bool = True,
-        pad_to_multiple_of: int = 8,
-        pad_side: str = 'L',
+        slots: dict[str, str | 'TokenSequence'] | T.Iterable[dict[str, str | 'TokenSequence']] = None,
+        /, **slots_: str | 'TokenSequence'
     ) -> T.Union['TokenSequence', 'TokenSequenceBatch']:
-        if isinstance(slots, dict):
-            return self._fill_single(slots, max_length, min_length, pad_to_multiple_of, pad_side)
+        if slots is None:
+            return self._fill_single(
+                slots_,
+                max_length=self.max_length,
+                min_length=self.min_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side)
+        elif isinstance(slots, dict):
+            return self._fill_single(
+                slots,
+                max_length=self.max_length,
+                min_length=self.min_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side)
         else:
-            return self._fill_batch(slots, max_length, min_length, pad_to_same_length, pad_to_multiple_of, pad_side)
+            return self._fill_batch(
+                slots,
+                max_length=self.max_length,
+                min_length=self.min_length,
+                pad_to_same_length=self.pad_to_same_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side)
 
     def _fill_single(self,
         slots: dict[str, str | 'TokenSequence'],
@@ -298,52 +358,72 @@ class TokenTemplate(_DisplaySettings, list):
     ):
         assert all(slot in self.slots for slot in slots), \
             f"Slots {set(slots) - set(self.slots)} not found in TokenSequence."
-        slot_subseqs = []
         filled = []
-        previous_splitter = 0
-        for slot_name, text in slots.items():
+        # convert slot values to TokenSequence object, keyed by slot name
+        slot_subseqs = {} # slot name, value seq
+        for slot_name, text_seq in slots.items():
+            assert slot_name in self.slots, f"Slot {slot_name} not found in TokenTemplate."
             slot = self.slots[slot_name]
-            if isinstance(text, str):
-                text = TokenSequence(text, is_label=slot.is_label, tokenizer=self.tokenizer)
+            if isinstance(text_seq, str):
+                text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
             if slot.eos is None:
                 eos = ((self.tokenizer.eos_token_id, True, slot.is_label),)
             elif slot.eos:
                 eos = TokenSequence(slot.eos, is_label=slot.is_label, tokenizer=self.tokenizer)
             else:
                 eos = ()
-            text.extend(eos)
-            slot_subseqs.append([slot, text])
-        for i, slot_subseq in enumerate(slot_subseqs):
-            slot, subseq = slot_subseq
+            text_seq.extend(eos)
+            slot_subseqs[slot_name] = text_seq
+        # get the prefix of this self template that contains slots about to be filled with given values
+        template_prefix_slots = {}
+        for slot_name, slot in self.slots.items():
+            if slot_name not in slot_subseqs:
+                end_of_filled = slot.index
+                break
+            else:
+                template_prefix_slots[slot_name] = slot
+        else: # no break
+            end_of_filled = None
+        template_prefix = list.__getitem__(self, slice(0, end_of_filled))
+        # apply per-slot independent truncation rules based on per-slot max length
+        for slot_name, subseq in slot_subseqs.items():
+            slot = self.slots[slot_name]
             if slot.max and len(subseq) > slot.max:
                 if slot.trunc_side == 'L':
-                    slot_subseqs[i][1] = subseq[-slot.max:]
+                    slot_subseqs[slot_name] = subseq[-slot.max:]
                 else:
-                    slot_subseqs[i][1] = subseq[:slot.max]
+                    slot_subseqs[slot_name] = subseq[:slot.max]
+        # calculate whether/how much we need to truncate
         template_length = len(self) - len(self.slots)
-        current_length = sum(len(value) for _, value in slot_subseqs) + template_length
+        current_length = sum(len(text_seq) for text_seq in slot_subseqs.values()) + template_length
         if max_length is not None and current_length > max_length:
-            slot_trunc_candidates = iter(sorted(enumerate(slot_subseqs), key=lambda x: x[1][0].trunc_rank))
-            for slot_subseq in slot_trunc_candidates:
-                i, (slot, subseq) = slot_subseq
+            # truncate each slot value as much as possible (per-slot min is a floor) in order of trunc_rank until fit
+            slot_trunc_candidates = iter(sorted(slot_subseqs, key=lambda x: self.slots[x].trunc_rank))
+            for candidate_slot_name in slot_trunc_candidates:
+                subseq = slot_subseqs[candidate_slot_name]
+                slot = self.slots[candidate_slot_name]
                 amount_to_truncate = max(min(current_length - max_length, len(subseq) - slot.min, len(subseq)), 0)
                 if amount_to_truncate:
                     if slot.trunc_side == 'L':
-                        slot_subseqs[i][1] = subseq[amount_to_truncate:]
+                        slot_subseqs[candidate_slot_name] = subseq[amount_to_truncate:]
                     else:
-                        slot_subseqs[i][1] = subseq[:-amount_to_truncate]
-                    current_length = sum(len(value) for _, value in slot_subseqs) + template_length
+                        slot_subseqs[candidate_slot_name] = subseq[:-amount_to_truncate]
+                    current_length = sum(len(text_seq) for text_seq in slot_subseqs.values()) + template_length
                     if current_length <= max_length:
                         break
             else: # nobreak
                 raise ValueError(f"Could not truncate slot text to fit within max_length {max_length} (max truncation was reached after sequence was cut down to {current_length} tokens).")
-        for slot, value in slot_subseqs:
-            splitter = slot.index
-            prefix = self[previous_splitter:splitter]
-            filled.extend(prefix)
-            filled.extend(value)
-            previous_splitter = splitter + 1
-        filled.extend(self[previous_splitter:])
+        # join together the final sequence
+        previous_splitter = 0
+        for slot_name, subseq in slot_subseqs.items():
+            if slot_name in template_prefix_slots:
+                splitter = self.slots[slot_name].index
+                segment = template_prefix[previous_splitter:splitter]
+                filled.extend(segment)
+                filled.extend(subseq)
+                previous_splitter = splitter + 1
+        filled.extend(template_prefix[previous_splitter:])
+        # pad the final sequence if needed
         if min_length is not None and len(filled) < min_length:
             pad_length = min_length - len(filled)
             remainder = pad_length % pad_to_multiple_of
