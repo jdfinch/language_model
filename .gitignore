@@ -5,3 +5,4 @@ scratch
 *.pyc
 *__pycache__*
 subgit
+.vscode

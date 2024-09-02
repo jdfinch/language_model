@@ -61,7 +61,7 @@ class Tokenizer:
         
 class _DisplaySettings:
     _display_width = 80
-    _display_token_colors = ((25, 20, 65), (0, 30, 60), (0, 40, 50))
+    _display_token_colors = ((55, 45, 120), (30, 70, 130), (20, 90, 110))
     _display_padding_color = ('black',)
     _display_foreground_color = (200, 200, 200)
     _display_label_color = (255, 255, 255)
