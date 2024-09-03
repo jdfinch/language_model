@@ -73,6 +73,27 @@ with test('Triple Slot Template'):
     print(ts_4.display())
 
 
+with test('Truncation Specified No Effect'):
+    base_template = ll3_tokenizer.templatize(tw.dedent('''
+    
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    
+    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    
+    #[output=a]#
+    
+    ''').strip())
+    short_template = base_template.copy(max_length=50)
+    print(short_template.display())
+    short_seq = short_template.fill(
+        sys="Please answer without hallucinating",
+        q='What is the capital of France?',
+        a='The capital of France is Paris.')
+    print(short_seq.display())
+
+
 with test('Default Truncation'):
     base_template = ll3_tokenizer.templatize(tw.dedent('''
     
@@ -126,15 +147,14 @@ with test('Right Truncate'):
     
     <|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
-    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    #[input=sys,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
     
     #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
     
     #[output=a]#
     
-    ''').strip())
+    ''').strip(), max_length=25)
         
-    rt_template = base_template.copy(pad_side='right', max_length=25)
     rt_seq = rt_template.fill(
         sys="Please answer without hallucinating",
         q='What is the capital of France?',
@@ -154,17 +174,135 @@ with test('Right Truncate'):
     assert char(rt_seq[16][0]) == 'capital'
     assert char(rt_seq[17][0]) == 'of'
     assert char(rt_seq[18][0]) == 'France'
-    assert char(rt_seq[18][0]) == '?'
+    assert char(rt_seq[19][0]) == '?'
     # a
     assert uchar(rt_seq[-1][0]) == '\n\n'
 
 
-with test('Mixed Truncate'):
-    ...
+with test('Right Truncate Into User'):
+    rt_template = ll3_tokenizer.templatize(tw.dedent('''
+    
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    
+    #[input=q,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    
+    #[output=a]#
+    
+    ''').strip(), max_length=20)
+        
+    rt_seq = rt_template.fill(
+        sys="Please answer without hallucinating",
+        q='What is the capital of France?',
+        a='The capital of France is Paris.')
+    print(rt_seq.display())
+
+    char = lambda x: rt_seq.tokenizer.decode(x).strip()
+    uchar = rt_seq.tokenizer.decode
+    # q
+    assert char(rt_seq[10][0]) == 'What'
+    assert char(rt_seq[11][0]) == 'is'
+    assert char(rt_seq[12][0]) == 'the'
+    assert char(rt_seq[13][0]) == 'capital'
+    assert char(rt_seq[14][0]) == 'of'
+    # a
+    assert uchar(rt_seq[-1][0]) == '\n\n'
 
 
-with test('Protect Slot From Truncation'):
-    ...
+with test('Exact Protect Slot From Truncation'):
+    rt_template = ll3_tokenizer.templatize(tw.dedent('''
+    
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    
+    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    
+    #[output=a,min=1,trunc_side=R]#
+    
+    ''').strip(), max_length=24)
+        
+    rt_seq = rt_template.fill(
+        sys="Please answer without hallucinating",
+        q='What is the capital of France?',
+        a='Paris.')
+    print(rt_seq.display())
+
+    char = lambda x: rt_seq.tokenizer.decode(x).strip()
+    uchar = rt_seq.tokenizer.decode
+    # sys
+    assert char(rt_seq[5][0]) == 'Please'
+    assert char(rt_seq[6][0]) == 'answer'
+    # q
+    assert char(rt_seq[12][0]) == 'What'
+    assert char(rt_seq[13][0]) == 'is'
+    assert char(rt_seq[14][0]) == 'the'
+    assert char(rt_seq[15][0]) == 'capital'
+    assert char(rt_seq[16][0]) == 'of'
+    assert char(rt_seq[17][0]) == 'France'
+    # a
+    assert uchar(rt_seq[23][0]) == 'Paris'
+
+
+with test('Conservative Protect Slot From Truncation', raises=ValueError):
+    rt_template = ll3_tokenizer.templatize(tw.dedent('''
+    
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    
+    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    
+    #[output=a,min=1,trunc_side=R]#
+    
+    ''').strip(), max_length=26)
+        
+    rt_seq = rt_template.fill(
+        sys="Please answer without hallucinating",
+        q='What is the capital of France?',
+        a='Paris.')
+    print(rt_seq.display())
+
+    char = lambda x: rt_seq.tokenizer.decode(x).strip()
+    uchar = rt_seq.tokenizer.decode
+    # sys
+    assert char(rt_seq[5][0]) == 'Please'
+    assert char(rt_seq[6][0]) == 'answer'
+    assert char(rt_seq[7][0]) == 'without'
+    # q
+    assert char(rt_seq[13][0]) == 'What'
+    assert char(rt_seq[14][0]) == 'is'
+    assert char(rt_seq[15][0]) == 'the'
+    assert char(rt_seq[16][0]) == 'capital'
+    assert char(rt_seq[17][0]) == 'of'
+    assert char(rt_seq[18][0]) == 'France'
+    assert char(rt_seq[19][0]) == '?'
+    # a
+    assert uchar(rt_seq[25][0]) == 'Paris'
+
+
+with test('Incompatible Max Length and Slot Protection Length', raises=ValueError):
+    rt_template = ll3_tokenizer.templatize(tw.dedent('''
+    
+    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
+    
+    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+    
+    #[output=a,min=1,trunc_side=R]#
+    
+    ''').strip(), max_length=20)
+        
+    rt_seq = rt_template.fill(
+        sys="Please answer without hallucinating",
+        q='What is the capital of France?',
+        a='Paris.')
+    print(rt_seq.display())
+
+
+# todo - changing slot truncation priority
 
 
 
