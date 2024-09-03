@@ -93,6 +93,13 @@ class Test:
         ):
             print(f"  {ansi.foreground_green}✓{ansi.reset} {time}\n", )  # (self.width - len(time) - 6) * '=')
             self.result = 'pass'
+        elif self.raises is not None and (not isinstance(exc_type, type) or not issubclass(exc_type, self.raises)):
+            if self.show:
+                print(ansi.foreground_red, end='')
+                error_message = f"Expected {self.raises.__name__} to raise on test {self.name}, but got {exc_type} instead."
+                print(error_message, end='')
+                print(ansi.reset, end='\n')
+            print(f"  {ansi.foreground_red}✗{ansi.reset} {time}\n",)
         else:
             if self.show:
                 print(ansi.foreground_red, end='')
@@ -101,7 +108,7 @@ class Test:
                 print(ansi.reset, end='')
             print(f"  {ansi.foreground_red}✗{ansi.reset} {time}\n",) # (self.width - len(time) - 6) * '=')
             self.result = exc_type
-        return True if self.crash else bool(self.result == 'pass')
+        return True if not self.crash else bool(self.result == 'pass')
 
 test = Test
 

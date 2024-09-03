@@ -56,6 +56,23 @@ class LlamaHypers(Config):
 
         {tok.TokOut()}"""
     ).lstrip()
+
+    formats: dict = default({
+        'sys (trunc=No)':'''<|begin_of_text|><|start_header_id|>system<|end_header_id>\n\n#[input=text]#<|eot_id|>''',
+        'user': '''<|start_header_id|>user<|end_header_id>\n\n#[input=text, min=10]#<|eot_id|>''',
+        'assistant':'''<|start_header_id|>assistant<|end_header_id>\n\n#[output=text, min=10, eos=<|eot_id|>]#''',
+        'assistant_history':'''<|start_header_id|>assistant<|end_header_id>\n\n#[input=text, min=10]#<|eot_id|>''',
+        'info (trunc=Partial)':'''<|start_header_id|>user<|end_header_id>\n\n#[input=text]#<|eot_id|>'''
+    })
+    
+    # for model.generate or model.train, send this list in
+    send = default([
+        dict(templ='sys', text='Please be a good chatbot.'),
+        dict(templ='user', text='Hi!'),
+        dict(templ='assistant', text='Hello! How can I help you today?'),
+        dict(templ='user', text='What is the capital of France?'),
+        dict(templ='assistant', text='Paris'),
+    ])
     """The format to use for training and generation. Use TokIn and TokOut objects to specify slots for input and output sequences (or just specify slots like #[input=myinput, trunc_side=L, trunc_rank=1.0]# or #[output=myoutput, max=50, min=20]# and customize truncation for sequences exceeding the max_sequence_length. When training and generating, data is passed in to fill slots in this format template."""
     max_sequence_length: int = 1024
     """The maximum token length of sequences the model trains on or can be fed as input for generation."""
@@ -258,7 +275,7 @@ class Llama(LlamaConfig):
             batch_size = self.physical_train_batch_size
             def generator(data=data, batch_size=batch_size):
                 for data_batch in batching(data, size=batch_size):
-                    batch = self.template.fill(data_batch, max_length=self.max_sequence_length)
+                    batch = self.template.fill(data_batch)
                     yield batch
             return generator() if not return_single_sequence else next(generator())
         else:
@@ -266,7 +283,7 @@ class Llama(LlamaConfig):
             batch_size = self.gen_batch_size
             def generator(data=data, batch_size=batch_size):
                 for data_batch in batching(data, size=batch_size):
-                    batch = self.template.fill(data_batch, max_length=self.max_sequence_length)
+                    batch = self.template.fill(data_batch)
                     yield batch
             return generator() if not return_single_sequence else next(generator())
 

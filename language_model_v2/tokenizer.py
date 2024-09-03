@@ -149,6 +149,15 @@ class TokenSequence(_DisplaySettings, list):
             attention_mask=seq_type([t[1] for t in self]),
             labels=seq_type([t[0] if t[2] else -100 for t in self]))
 
+    def tokens(self, strip=False):
+        tokens = [self.tokenizer.decode(t[0], clean_up_tokenization_spaces=strip)
+        if isinstance(t, tuple) else t.as_text() for t in self]
+        if strip:
+            stripped = [t.strip() for t in tokens]
+            return [x or y for x, y in zip(stripped, tokens)]
+        else:
+            return tokens
+
     def __str__(self):
         if len(self) > 10:
             return f'<TokenSequence len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self[:10])}|...>' # noqa
@@ -335,6 +344,15 @@ class TokenTemplate(_DisplaySettings, list):
             return copy
         else:
             return list.__getitem__(self, item)
+
+    def tokens(self, strip=False):
+        tokens = [self.tokenizer.decode(t[0], clean_up_tokenization_spaces=strip)
+            if isinstance(t, tuple) else t.as_text() for t in self]
+        if strip:
+            stripped = [t.strip() for t in tokens]
+            return [x or y for x, y in zip(stripped, tokens)]
+        else:
+            return tokens
 
     def fill(self,
         slots: dict[str, str | 'TokenSequence'] | T.Iterable[dict[str, str | 'TokenSequence']] = None,

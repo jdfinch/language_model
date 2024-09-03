@@ -124,22 +124,9 @@ with test('More Truncation'):
         a='The capital of France is Paris.')
     print(shorter_seq.display())
 
-    char = lambda x: shorter_seq.tokenizer.decode(x).strip()
-    uchar = shorter_seq.tokenizer.decode
-    # sys
-    assert char(shorter_seq[5][0]) == 'without'
-    assert char(shorter_seq[6][0]) == 'halluc'
-    assert char(shorter_seq[7][0]) == 'inating'
-    # q
-    assert char(shorter_seq[13][0]) == 'What'
-    assert char(shorter_seq[14][0]) == 'is'
-    assert char(shorter_seq[15][0]) == 'the'
-    assert char(shorter_seq[16][0]) == 'capital'
-    assert char(shorter_seq[17][0]) == 'of'
-    assert char(shorter_seq[18][0]) == 'France'
-    assert char(shorter_seq[19][0]) == '?'
-    # a
-    assert uchar(shorter_seq[-1][0]) == '\n\n'
+    assert shorter_seq.tokens(strip=True)[5:8] == ['without', 'halluc', 'inating']
+    assert shorter_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
+    assert shorter_seq.tokens(strip=True)[-1] == '\n\n'
 
 
 with test('Right Truncate'):
@@ -161,22 +148,9 @@ with test('Right Truncate'):
         a='The capital of France is Paris.')
     print(rt_seq.display())
 
-    char = lambda x: rt_seq.tokenizer.decode(x).strip()
-    uchar = rt_seq.tokenizer.decode
-    # sys
-    assert char(rt_seq[5][0]) == 'Please'
-    assert char(rt_seq[6][0]) == 'answer'
-    assert char(rt_seq[7][0]) == 'without'
-    # q
-    assert char(rt_seq[13][0]) == 'What'
-    assert char(rt_seq[14][0]) == 'is'
-    assert char(rt_seq[15][0]) == 'the'
-    assert char(rt_seq[16][0]) == 'capital'
-    assert char(rt_seq[17][0]) == 'of'
-    assert char(rt_seq[18][0]) == 'France'
-    assert char(rt_seq[19][0]) == '?'
-    # a
-    assert uchar(rt_seq[-1][0]) == '\n\n'
+    assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
+    assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
+    assert rt_seq.tokens()[-1] == '\n\n'
 
 
 with test('Right Truncate Into User'):
@@ -198,16 +172,8 @@ with test('Right Truncate Into User'):
         a='The capital of France is Paris.')
     print(rt_seq.display())
 
-    char = lambda x: rt_seq.tokenizer.decode(x).strip()
-    uchar = rt_seq.tokenizer.decode
-    # q
-    assert char(rt_seq[10][0]) == 'What'
-    assert char(rt_seq[11][0]) == 'is'
-    assert char(rt_seq[12][0]) == 'the'
-    assert char(rt_seq[13][0]) == 'capital'
-    assert char(rt_seq[14][0]) == 'of'
-    # a
-    assert uchar(rt_seq[-1][0]) == '\n\n'
+    assert rt_seq.tokens(strip=True)[10:15] == ['What', 'is', 'the', 'capital', 'of']
+    assert rt_seq.tokens()[-1] == '\n\n'
 
 
 with test('Exact Protect Slot From Truncation'):
@@ -229,23 +195,12 @@ with test('Exact Protect Slot From Truncation'):
         a='Paris.')
     print(rt_seq.display())
 
-    char = lambda x: rt_seq.tokenizer.decode(x).strip()
-    uchar = rt_seq.tokenizer.decode
-    # sys
-    assert char(rt_seq[5][0]) == 'Please'
-    assert char(rt_seq[6][0]) == 'answer'
-    # q
-    assert char(rt_seq[12][0]) == 'What'
-    assert char(rt_seq[13][0]) == 'is'
-    assert char(rt_seq[14][0]) == 'the'
-    assert char(rt_seq[15][0]) == 'capital'
-    assert char(rt_seq[16][0]) == 'of'
-    assert char(rt_seq[17][0]) == 'France'
-    # a
-    assert uchar(rt_seq[23][0]) == 'Paris'
+    assert rt_seq.tokens(strip=True)[5:7] == ['Please', 'answer']
+    assert rt_seq.tokens(strip=True)[12:18] == ['What', 'is', 'the', 'capital', 'of', 'France']
+    assert rt_seq.tokens()[-1] == 'Paris'
 
 
-with test('Conservative Protect Slot From Truncation', raises=ValueError):
+with test('Conservative Protect Slot From Truncation'):
     rt_template = ll3_tokenizer.templatize(tw.dedent('''
     
     <|begin_of_text|><|start_header_id|>system<|end_header_id|>
@@ -264,22 +219,9 @@ with test('Conservative Protect Slot From Truncation', raises=ValueError):
         a='Paris.')
     print(rt_seq.display())
 
-    char = lambda x: rt_seq.tokenizer.decode(x).strip()
-    uchar = rt_seq.tokenizer.decode
-    # sys
-    assert char(rt_seq[5][0]) == 'Please'
-    assert char(rt_seq[6][0]) == 'answer'
-    assert char(rt_seq[7][0]) == 'without'
-    # q
-    assert char(rt_seq[13][0]) == 'What'
-    assert char(rt_seq[14][0]) == 'is'
-    assert char(rt_seq[15][0]) == 'the'
-    assert char(rt_seq[16][0]) == 'capital'
-    assert char(rt_seq[17][0]) == 'of'
-    assert char(rt_seq[18][0]) == 'France'
-    assert char(rt_seq[19][0]) == '?'
-    # a
-    assert uchar(rt_seq[25][0]) == 'Paris'
+    assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
+    assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
+    assert rt_seq.tokens()[-1] == 'Paris'
 
 
 with test('Incompatible Max Length and Slot Protection Length', raises=ValueError):
@@ -299,7 +241,6 @@ with test('Incompatible Max Length and Slot Protection Length', raises=ValueErro
         sys="Please answer without hallucinating",
         q='What is the capital of France?',
         a='Paris.')
-    print(rt_seq.display())
 
 
 # todo - changing slot truncation priority
