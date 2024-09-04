@@ -40,6 +40,10 @@ with test('Fill Input Only'):
     ll2_input = ll2_template.fill(q='What is the capital of France?')
     print(ll2_input.display())
 
+    assert 'What is the capital of France?' in ll3_input.text()
+    assert 'What is the capital of France?' in ll2_input.text()
+    assert ll3_input.tokens()[-1] != '<|eot_id|>'
+
 
 with test('Fill Input and Output'):
     ll3_input_output = ll3_template.fill(q='What is the capital of France?', a='Paris')
@@ -47,6 +51,13 @@ with test('Fill Input and Output'):
 
     ll2_input_output = ll2_template.fill(q='What is the capital of France?', a='Paris')
     print(ll2_input_output.display())
+
+    assert 'What is the capital of France?' in ll3_input_output.text()
+    assert 'What is the capital of France?' in ll2_input_output.text()
+    assert 'Paris' in ll3_input_output.text()
+    assert 'Paris' in ll2_input_output.text()
+    assert ll3_input_output.tokens()[-1] == '<|eot_id|>'
+    assert ll2_input_output.tokens()[-1] == '</s>'
 
 
 
@@ -93,6 +104,11 @@ with test('Truncation Specified No Effect'):
         a='The capital of France is Paris.')
     print(short_seq.display())
 
+    text = short_seq.text()
+    assert 'Please answer without hallucinating' in text
+    assert 'What is the capital of France?' in text
+    assert 'The capital of France is Paris.' in text
+
 
 with test('Default Truncation'):
     base_template = ll3_tokenizer.templatize(tw.dedent('''
@@ -113,6 +129,12 @@ with test('Default Truncation'):
         q='What is the capital of France?',
         a='The capital of France is Paris.')
     print(short_seq.display())
+
+    text = short_seq.text()
+    assert 'Please answer without hallucinating' in text
+    assert 'What is the capital of France?' in text
+    assert 'The capital of France is Paris.' not in text
+    assert 'The capital of' in text
 
 
 with test('More Truncation'):
@@ -148,6 +170,7 @@ with test('Right Truncate'):
         a='The capital of France is Paris.')
     print(rt_seq.display())
 
+    assert len(rt_seq) == 25
     assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
     assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
     assert rt_seq.tokens()[-1] == '\n\n'
@@ -172,6 +195,7 @@ with test('Right Truncate Into User'):
         a='The capital of France is Paris.')
     print(rt_seq.display())
 
+    assert len(rt_seq) == 20
     assert rt_seq.tokens(strip=True)[10:15] == ['What', 'is', 'the', 'capital', 'of']
     assert rt_seq.tokens()[-1] == '\n\n'
 
@@ -195,6 +219,7 @@ with test('Exact Protect Slot From Truncation'):
         a='Paris.')
     print(rt_seq.display())
 
+    assert len(rt_seq) == 24
     assert rt_seq.tokens(strip=True)[5:7] == ['Please', 'answer']
     assert rt_seq.tokens(strip=True)[12:18] == ['What', 'is', 'the', 'capital', 'of', 'France']
     assert rt_seq.tokens()[-1] == 'Paris'
@@ -219,6 +244,7 @@ with test('Conservative Protect Slot From Truncation'):
         a='Paris.')
     print(rt_seq.display())
 
+    assert len(rt_seq) == 26
     assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
     assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
     assert rt_seq.tokens()[-1] == 'Paris'
@@ -244,6 +270,79 @@ with test('Incompatible Max Length and Slot Protection Length', raises=ValueErro
 
 
 # todo - changing slot truncation priority
+
+
+with test('Construct Template Collection'):
+    templates = ll3_tokenizer.templatize({
+        'system_prompt (trunc_content=False, trunc_segment=False)':
+            '<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n#[input=text]#<|eot_id|>',
+        'document (trunc_segment=False)':
+            '<|start_header_id|>user<|end_header_id|>\n\nPlease base your answers on the doc:\n\n#[input=text, min=8, trunc_side=R]#<|eot_id|>',
+        'user_instruction (trunc_content=False)':
+            '<|start_header_id|>user<|end_header_id|>\n\n#[input=text]#<|eot_id|>',
+        'assistant_response (trunc_content=False)':
+            '<|start_header_id|>assistant<|end_header_id|>\n\n#[output=text]#',
+        'assistant_prefix (trunc_content=False)':
+            '<|start_header_id|>assistant<|end_header_id|>\n\n#[input=text]#',
+        'assistant_continuation':
+            '#[output=text, min=3]#',
+    })
+
+    for name, template in templates.templates.items():
+        print(name, f'{template.trunc_segment=}', f'{template.trunc_content=}')
+        print(template.display())
+
+
+with test('Dialogue Sequence'):
+    dialogue = [
+        dict(temp='system_prompt', text='You are a helpful assistant.'),
+        dict(temp='document', text='France is a country in Europe. It has a long history.'),
+        dict(temp='user_instruction', text='Hi there, can you help me?'),
+        dict(temp='assistant_response', text='Of course! How can I help you today?'),
+        dict(temp='user_instruction', text='What is the capital of France?'),
+        dict(temp='assistant_response', text='The capital of France is Paris.'),
+    ]
+    tokens = templates.fill(dialogue)
+    print(tokens.display())
+
+with test('Dialogue Sequence with Small Truncation'):
+    templates_with_truncation = dc.replace(templates, max_length=87)
+    tokens = templates_with_truncation.fill(dialogue)
+    print(tokens.display())
+
+with test('Dialogue Sequence with More Truncation'):
+    templates_with_truncation = dc.replace(templates, max_length=80)
+    tokens = templates_with_truncation.fill(dialogue)
+    print(tokens.display())
+
+with test('Dialogue Sequence with Large Truncation'):
+    templates_with_truncation = dc.replace(templates, max_length=60)
+    tokens = templates_with_truncation.fill(dialogue)
+    print(tokens.display())
+
+with test('Batch Dialogue Tokenization with Large Truncation'):
+    dialogue2 = [
+        dict(temp='system_prompt', text='You are a helpful assistant.'),
+        dict(temp='document', text='France is a country.'),
+        dict(temp='user_instruction', text='Hi there, can you help?'),
+        dict(temp='assistant_response', text='Of course! How can I help you today?'),
+        dict(temp='user_instruction', text='What is the capital of France?'),
+        dict(temp='assistant_response', text='It is Paris!'),
+    ]
+    dialogue3 = [
+        dict(temp='system_prompt', text='You are a helpful assistant.'),
+        dict(temp='document', text='France is a country in Europe. It has a long history and people speak French there.'),
+        dict(temp='user_instruction', text='Hi there!'),
+        dict(temp='assistant_response', text='How can I help you today? I am a helpful assistant.'),
+        dict(temp='user_instruction', text='What is the capital of France?'),
+        dict(temp='assistant_response', text='The capital of France is Paris. Would you like to know more?'),
+    ]
+    dialogues = [dialogue, dialogue2, dialogue3]
+    temps = dc.replace(templates_with_truncation, pad_to_multiple_of=1)
+    tokens = templates_with_truncation.fill(dialogues)
+    print(tokens.display())
+
+
 
 
 

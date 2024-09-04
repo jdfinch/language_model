@@ -29,6 +29,21 @@ def config(cls=None, **kwargs):
     cls.__init__ = __init__
     return cls
 
+
+F = T.TypeVar('F', bound=T.Callable)
+
+def defaults_from_self(method: F) -> F:
+    sig = ins.signature(method)
+    def wrapper_method(self, *args, **kwargs):
+        binding = sig.bind(self, *args, **kwargs)
+        arguments = binding.arguments
+        from_self = {k: getattr(self, k) for k in sig.parameters if k not in arguments}
+        arguments.update(from_self)
+        result = method(*binding.args, **binding.kwargs)
+        return result
+    return wrapper_method
+
+
 class Config:
     __config__: dict[str, T.Any]
     __default__: dict[str, T.Any]
@@ -48,6 +63,10 @@ if __name__ == '__main__':
             print(f'{self.__config__ = }')
             print(f'{self.__default__ = }')
 
+        @defaults_from_self
+        def foo(self, x=None, z=None):
+            print('Foo!', f'{x = }', f'{z = }')
+
 
     @dataclass
     class B(A):
@@ -58,3 +77,13 @@ if __name__ == '__main__':
     print(f'{vars(a) = }')
     b = B(8)
     print(f'{b = }')
+
+    b.foo(3)
+    b.foo(z=[7, 9])
+
+
+
+
+
+
+

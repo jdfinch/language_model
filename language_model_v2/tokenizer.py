@@ -7,6 +7,7 @@ import collections as coll
 import itertools as it
 import functools as ft
 from language_model_v2.utils.config import config, Config
+from language_model_v2.utils.peek import peek
 from language_model_v2.utils import ansi
 
 # black magic type hinting of config as dataclass
@@ -23,19 +24,23 @@ def _imports(): pass
 default: T.Any = object()
 
 
+def get_tokenizer(tokenizer: str | PreTrainedTokenizer) -> PreTrainedTokenizer:
+    if isinstance(tokenizer, str):
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+    if tokenizer.pad_token_id is None:
+        pad_token = '-'
+        pad_token_id = tokenizer.convert_tokens_to_ids(pad_token)
+        tokenizer.pad_token = pad_token
+        tokenizer.pad_token_id = pad_token_id
+    return tokenizer
+
+
 class Tokenizer:
     def __init__(self, tokenizer: PreTrainedTokenizer|str):
-        if isinstance(tokenizer, str):
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer)
-        if tokenizer.pad_token_id is None:
-            pad_token = '-'
-            pad_token_id = tokenizer.convert_tokens_to_ids(pad_token)
-            tokenizer.pad_token = pad_token
-            tokenizer.pad_token_id = pad_token_id
-        self.tokenizer = tokenizer
+        self.tokenizer = get_tokenizer(tokenizer)
             
     def templatize(self, 
-        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'],
+        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'] | dict[str, str|TokenTemplate],
         is_attended: bool = default,
         is_label: bool = default,
         max_length: int = None,
@@ -43,17 +48,29 @@ class Tokenizer:
         pad_to_same_length: bool = True,
         pad_to_multiple_of: int = 8,
         pad_side: str = 'L',
-    ) -> 'TokenTemplate':
-        return TokenTemplate(
-            *sequence,
-            is_attended=is_attended,
-            is_label=is_label,
-            max_length=max_length,
-            min_length=min_length,
-            pad_to_same_length=pad_to_same_length,
-            pad_to_multiple_of=pad_to_multiple_of,
-            pad_side=pad_side,
-            tokenizer=self.tokenizer)
+        trunc_segments_side: str = 'L',
+    ) -> T.Union['TokenTemplate', 'TokenTemplateCollection']:
+        if sequence and isinstance(sequence[0], dict):
+            return TokenTemplateCollection(
+                {name: template for templates in sequence for name, template in templates.items()},
+                max_length=max_length,
+                min_length=min_length,
+                pad_to_same_length=pad_to_same_length,
+                pad_to_multiple_of=pad_to_multiple_of,
+                pad_side=pad_side,
+                trunc_segments_side=trunc_segments_side,
+                tokenizer=self.tokenizer)
+        else:
+            return TokenTemplate(
+                *sequence,
+                is_attended=is_attended,
+                is_label=is_label,
+                max_length=max_length,
+                min_length=min_length,
+                pad_to_same_length=pad_to_same_length,
+                pad_to_multiple_of=pad_to_multiple_of,
+                pad_side=pad_side,
+                tokenizer=self.tokenizer)
     
     def tokenize(self, 
         *sequences: str | T.Iterable[tuple[int, bool, bool]] | T.Iterable[str | T.Iterable[tuple[int, bool, bool]]],
@@ -86,9 +103,9 @@ def display_tokens(seq: TokenSequence | TokenTemplate):
     num_slots = len(seq.slots) if hasattr(seq, 'slots') else 0
     num_tokens = len(seq) - num_slots
     if num_slots > 0:
-        print(f"{seq.__class__.__name__} with {num_tokens} tokens and {num_slots} slots:")
+        header = f"{seq.__class__.__name__} with {num_tokens} tokens and {num_slots} slots:"
     else:
-        print(f"{seq.__class__.__name__} with {num_tokens} tokens:")
+        header = f"{seq.__class__.__name__} with {num_tokens} tokens:"
     display_tokens = []
     for token, token_background_color in zip(seq, it.cycle(seq._display_token_colors)):
         if isinstance(token, TokSlot):
@@ -111,7 +128,7 @@ def display_tokens(seq: TokenSequence | TokenTemplate):
             display_tokens.append(ansi.color(*seq._display_padding_color).fg)
         display_tokens.append(token_text)
         display_tokens.append(ansi.reset)
-    return ''.join(display_tokens) + '\n\n'
+    return header + '\n' + ''.join(display_tokens) + '\n\n'
 
 
 class TokenSequence(_DisplaySettings, list):
@@ -125,14 +142,21 @@ class TokenSequence(_DisplaySettings, list):
     ):
         self.tokenizer = tokenizer
         list.__init__(self)
-        if is_attended is default: is_attended = True
-        if is_label is default: is_label = False
+        attended = True if is_attended is default else is_attended
+        label = False if is_label is default else is_label
         for sequence in sequence:
             if isinstance(sequence, str):
                 token_ids = self.tokenizer.encode(sequence, add_special_tokens=False)
-                list.extend(self, ((token_id, is_attended, is_label) for token_id in token_ids))
-            else:
+                list.extend(self, ((token_id, attended, label) for token_id in token_ids))
+            elif is_attended is default and is_label is default:
                 list.extend(self, sequence)
+            elif is_attended is default:
+                list.extend(self, ((token_id, a, label) for token_id, a, l in sequence))
+            elif is_label is default:
+                list.extend(self, ((token_id, attended, l) for token_id, a, l in sequence))
+            else:
+                list.extend(self, ((token_id, attended, label) for token_id, _, _ in sequence))
+
 
     def __getitem__(self, item):
         if isinstance(item, slice):
@@ -239,7 +263,7 @@ class TokenSequenceBatch(list):
 
 
 class TokenTemplate(_DisplaySettings, list):
-    _slot_pattern = re.compile(r"#\[([a-z_A-Z0-9]+=[^,\]]*(?:, ?[a-z_A-Z0-9]+=[^,\]]*)*)]#")
+    _slot_pattern = re.compile(r"#\[(.*?)]#")
 
     def __init__(self,
         *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | TokSlot],
@@ -250,6 +274,8 @@ class TokenTemplate(_DisplaySettings, list):
         pad_to_same_length: bool = True,
         pad_to_multiple_of: int = 8,
         pad_side: str = 'L',
+        trunc_segment: bool = True,
+        trunc_content: bool = True,
         tokenizer: PreTrainedTokenizer = None,
     ):
         self.tokenizer = tokenizer
@@ -260,6 +286,8 @@ class TokenTemplate(_DisplaySettings, list):
         self.pad_to_same_length = pad_to_same_length
         self.pad_to_multiple_of = pad_to_multiple_of
         self.pad_side = pad_side
+        self.trunc_segment = trunc_segment if isinstance(trunc_segment, bool) else 'TRUE'.startswith(trunc_segment.upper()) # noqa
+        self.trunc_content = trunc_content if isinstance(trunc_content, bool) else 'TRUE'.startswith(trunc_content.upper()) # noqa
         list.__init__(self)
         """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
         self.slots: dict[str, TokSlot] = {}
@@ -312,6 +340,8 @@ class TokenTemplate(_DisplaySettings, list):
         pad_to_same_length: bool = default,
         pad_to_multiple_of: int = default,
         pad_side: str = default,
+        trunc_segment: bool = default,
+        trunc_content: bool = default,
         tokenizer: PreTrainedTokenizer = default,
     ) -> 'TokenTemplate':
         c = self.__class__(
@@ -323,6 +353,8 @@ class TokenTemplate(_DisplaySettings, list):
             pad_to_same_length=self.pad_to_same_length if pad_to_same_length is default else pad_to_same_length,
             pad_to_multiple_of=self.pad_to_multiple_of if pad_to_multiple_of is default else pad_to_multiple_of,
             pad_side=self.pad_side if pad_side is default else pad_side,
+            trunc_segment=self.trunc_segment if trunc_segment is default else trunc_segment,
+            trunc_content=self.trunc_content if trunc_content is default else trunc_content,
             tokenizer=self.tokenizer if tokenizer is default else tokenizer)
         list.extend(c, self)
         c.slots = dict(self.slots)
@@ -344,6 +376,9 @@ class TokenTemplate(_DisplaySettings, list):
             return copy
         else:
             return list.__getitem__(self, item)
+
+    def template_length(self):
+        return len(self) - len(self.slots)
 
     def tokens(self, strip=False):
         tokens = [self.tokenizer.decode(t[0], clean_up_tokenization_spaces=strip)
@@ -396,8 +431,7 @@ class TokenTemplate(_DisplaySettings, list):
         for slot_name, text_seq in slots.items():
             assert slot_name in self.slots, f"Slot {slot_name} not found in TokenTemplate."
             slot = self.slots[slot_name]
-            if isinstance(text_seq, str):
-                text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
+            text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
             if slot.eos is None:
                 eos = ((self.tokenizer.eos_token_id, True, slot.is_label),)
             elif slot.eos:
@@ -426,7 +460,10 @@ class TokenTemplate(_DisplaySettings, list):
                 else:
                     slot_subseqs[slot_name] = subseq[:slot.max]
         # calculate whether/how much we need to truncate
-        template_length = len(self) - len(self.slots)
+        if end_of_filled is None:
+            template_length = self.template_length()
+        else:
+            template_length = end_of_filled + self[end_of_filled].min_gen
         current_length = sum(len(text_seq) for text_seq in slot_subseqs.values()) + template_length
         if max_length is not None and current_length > max_length:
             # truncate each slot value as much as possible (per-slot min is a floor) in order of trunc_rank until fit
@@ -503,7 +540,144 @@ class TokenTemplate(_DisplaySettings, list):
         return display_tokens(self)
 
 
-def _tokenclasses(): pass
+@dc.dataclass
+class TokenTemplateCollection:
+    templates: dict[str, str|TokenTemplate] = dc.field(default_factory=dict)
+    max_length: int|None = None
+    min_length: int|None = None
+    pad_to_same_length: bool = True
+    pad_to_multiple_of: int = 8
+    pad_side: str = 'L'
+    trunc_segments_side: str = 'L'
+    tokenizer: str|PreTrainedTokenizer = None
+
+    _truncation_strategy_pattern = re.compile(r"\((.*?)\)")
+
+    def __post_init__(self):
+        self.tokenizer = get_tokenizer(self.tokenizer) if self.tokenizer is not None else None
+        templates = dict(self.templates)
+        self.templates = {}
+        for name, template in templates.items():
+            if isinstance(template, str):
+                template = TokenTemplate(template, tokenizer=self.tokenizer)
+                templates[name] = template
+            if template.tokenizer is None:
+                template.tokenizer = self.tokenizer
+        for name in list(templates):
+            if '(' in name:
+                match = self._truncation_strategy_pattern.search(name)
+                if match is None:
+                    raise ValueError(f"Truncation strategy must be in parentheses, but got {name}.")
+                strategy = dict(
+                    [x.strip() for x in argument.split('=', 1)]
+                    for argument in match.group(1).split(','))
+                template = templates.pop(name)
+                name = name[:match.start()].strip()
+                self.templates[name] = template.copy(**strategy)
+            else:
+                self.templates[name] = templates[name]
+        self.trunc_segments_side = 'R' if 'RIGHT'.startswith(self.trunc_segments_side.upper()) else 'L'
+        self.templates: dict[str, TokenTemplate] = self.templates
+
+    def fill(self,
+        segments: list[dict[str, str|TokenSequence]] | list[list[dict[str, str|TokenSequence]]]
+    ) -> TokenSequence | TokenSequenceBatch:
+        if any(isinstance(segment, dict) for segment in segments):
+            return self._fill_single(segments)
+        else:
+            return self._fill_batch(segments)
+
+    def _fill_single(self, segments: list[dict[str, str|TokenSequence]]):
+        # Get the template corresponding to each segment
+        templates = [self.templates[seg['temp']] for seg in segments]
+        # Convert all segment values to TokenSequence objects
+        segments_no_temp = []
+        for segment in segments:
+            seg_no_temp = {}
+            for slot_name, slot_value in segment.items():
+                if slot_name != 'temp':
+                    seg_no_temp[slot_name] = TokenSequence(slot_value, tokenizer=self.tokenizer)
+            segments_no_temp.append(seg_no_temp)
+        segments = segments_no_temp
+        # Caclulate the minimum possible length of each segment after filling its template
+        template_min_lengths = []
+        for i, (template, segment_values) in enumerate(zip(templates, segments)):
+            template_length = template.template_length()
+            values_length = 0
+            for j, (slot_name, slot) in enumerate(template.slots.items()):
+                if slot_name in segment_values:
+                    if template.trunc_content:
+                        values_length += min(len(segment_values[slot_name]), slot.min or 0)
+                    else:
+                        values_length += len(segment_values[slot_name])
+                else:
+                    template_length = slot.index - j
+                    template_min_lengths.append(template_length + values_length + slot.min_gen)
+                    break
+            else:
+                template_min_lengths.append(template_length + values_length)
+                continue
+            break
+        # Find which segments must be removed to satisfy the max_length constraint
+        total_min_length = sum(template_min_lengths)
+        if self.max_length is not None and total_min_length > self.max_length:
+            deleted = set()
+            if self.trunc_segments_side == 'R':
+                templates_values_minlens = reversed(list(enumerate(zip(templates, segments, template_min_lengths))))
+            else:
+                templates_values_minlens = enumerate(zip(templates, segments, template_min_lengths))
+            for i, (template, segment_values, template_min_length) in templates_values_minlens:
+                if self.max_length is None or total_min_length < self.max_length:
+                    break
+                if template.trunc_segment:
+                    deleted.add(i)
+                    total_min_length -= template_min_length
+            else:
+                raise ValueError(f"Could not truncate any segment to fit within max_length {self.max_length}.")
+            templates_and_values = [
+                (template, segment_values)
+                for i, (template, segment_values, _) in enumerate(zip(templates, segments, template_min_lengths))
+                if i not in deleted]
+        else:
+            templates_and_values = list(zip(templates, segments))
+        # Build a megatemplate by appending the segment index to each slot name
+        total_template = TokenTemplate(
+            max_length=self.max_length,
+            min_length=self.min_length,
+            pad_to_same_length=False,
+            pad_to_multiple_of=1,
+            tokenizer=self.tokenizer)
+        total_values = {}
+        for i, (template, values) in enumerate(templates_and_values):
+            offset = len(total_template)
+            list.extend(total_template, template)
+            for slot_name, slot in template.slots.items():
+                i_slot_name = f"{slot_name}__{i}"
+                total_template.slots[i_slot_name] = dc.replace(
+                    slot,
+                    name=i_slot_name,
+                    index=offset+slot.index,
+                    trunc_rank=slot.trunc_rank if template.trunc_content else float('+inf')
+                )
+                if slot_name in values:
+                    total_values[i_slot_name] = values[slot_name]
+        # Fill the megatemplate with the segment values
+        total_filled = total_template.fill(total_values)
+        return total_filled
+
+    def _fill_batch(self, segmentss: list[list[dict[str, str|TokenSequence]]]):
+        return TokenSequenceBatch(
+            [self._fill_single(segments) for segments in segmentss],
+            tokenizer=self.tokenizer,
+            min_length=self.min_length,
+            pad_to_same_length=self.pad_to_same_length,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+            pad_side=self.pad_side)
+
+
+
+
+
 
 
 @dataclass
@@ -515,6 +689,7 @@ class TokSlot(Config):
     trunc_rank: float = 1.0
     index: int = None
     is_label: bool = False
+    min_gen: int = 0
     eos: str | None = ''
 
     def __post_init__(self):
@@ -530,6 +705,7 @@ class TokSlot(Config):
         self.trunc_rank = float(self.trunc_rank)
         self.is_label = (self.is_label and isinstance(self.is_label, bool)
                          or not 'false'.startswith(str(self.is_label).lower()))
+        self.min_gen = int(self.min_gen)
         self.eos = None if self.eos in (None, 'None') else self.eos
 
     def as_text(self):
@@ -563,54 +739,6 @@ class TokOut(TokSlot):
 
 
 
-def main():
-    import textwrap as tw
-    template = tw.dedent(f"""
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-    {TokIn('my_input')}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-    {TokOut('my_output')}
-    """).strip()
-
-    print(template, '\n\n')
-
-    data = [
-        dict(my_input="What is the capital of France?"*100, my_output="The capital of France is Paris."),
-        dict(my_input="What is the capital of the United States of America (USA)?", my_output="The capital of the United States of America is Washington, D.C."*100)
-    ]
-
-    import time
-    import contextlib as cl
-
-    @cl.contextmanager
-    def timer(label):
-        t1 = time.perf_counter()
-        yield
-        t2 = time.perf_counter()
-        print(f"{label} took {t2 - t1:.3f} seconds.\n")
-
-    import torch as pt
-    llama_tokenizer = Tokenizer('meta-llama/Meta-Llama-3.1-8B-Instruct')
-    template_sequence = llama_tokenizer.templatize(template)
-    template_sequence.display()
-    batch_size = 128
-    data = data * (batch_size // len(data))
-    num_batches = 100
-    with timer("Filling token sequences"):
-        for _ in range(num_batches):
-            filled_sequence = template_sequence.fill(data, max_length=1024)
-            input_to_llm = filled_sequence.dict(seq_type=pt.LongTensor)
-    filled_sequence[:2].display()
-    return
-
-
-if __name__ == '__main__':
-    import cProfile
-    # cProfile.run('main()', sort='cumtime')
-    main()
 
 
 
