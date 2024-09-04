@@ -666,17 +666,14 @@ class TokenTemplateCollection:
         return total_filled
 
     def _fill_batch(self, segmentss: list[list[dict[str, str|TokenSequence]]]):
-        return TokenSequenceBatch(
+        batch = TokenSequenceBatch(
             [self._fill_single(segments) for segments in segmentss],
             tokenizer=self.tokenizer,
             min_length=self.min_length,
             pad_to_same_length=self.pad_to_same_length,
             pad_to_multiple_of=self.pad_to_multiple_of,
             pad_side=self.pad_side)
-
-
-
-
+        return batch
 
 
 
