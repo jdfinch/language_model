@@ -326,8 +326,24 @@ class TokenTemplate(_DisplaySettings, list):
                             raise ValueError(f"Slot be named using input= or output=, but got {arguments}")
                         assert slot.name not in self.slots, f"Duplicate slot name {slot.name} detected when constructing TokenSequence."
                         self.slots[slot.name] = slot
+                        if slot.eos_tokens is None and self.tokenizer:
+                            if slot.eos is None:
+                                slot.eos_tokens = ((self.tokenizer.eos_token_id, True, slot.is_label),)
+                            elif slot.eos:
+                                slot.eos_tokens = TokenSequence(
+                                    slot.eos, is_label=slot.is_label, tokenizer=self.tokenizer)
+                            else:
+                                slot.eos_tokens = ()
                         list.append(self, slot)
             elif isinstance(sequence, TokSlot):
+                slot = sequence
+                if slot.eos_tokens is None and self.tokenizer:
+                    if slot.eos is None:
+                        slot.eos_tokens = ((self.tokenizer.eos_token_id, True, slot.is_label),)
+                    elif slot.eos:
+                        slot.eos_tokens = TokenSequence(slot.eos, is_label=slot.is_label, tokenizer=self.tokenizer)
+                    else:
+                        slot.eos_tokens = ()
                 list.append(self, sequence)
             else:
                 list.extend(self, sequence)
@@ -432,7 +448,9 @@ class TokenTemplate(_DisplaySettings, list):
             assert slot_name in self.slots, f"Slot {slot_name} not found in TokenTemplate."
             slot = self.slots[slot_name]
             text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
-            if slot.eos is None:
+            if slot.eos_tokens is not None:
+                eos = slot.eos_tokens
+            elif slot.eos is None:
                 eos = ((self.tokenizer.eos_token_id, True, slot.is_label),)
             elif slot.eos:
                 eos = TokenSequence(slot.eos, is_label=slot.is_label, tokenizer=self.tokenizer)
@@ -609,7 +627,7 @@ class TokenTemplateCollection:
                     if template.trunc_content:
                         values_length += min(len(segment_values[slot_name]), slot.min or 0)
                     else:
-                        values_length += len(segment_values[slot_name])
+                        values_length += len(segment_values[slot_name]) + len(slot.eos_tokens or ())
                 else:
                     template_length = slot.index - j
                     template_min_lengths.append(template_length + values_length + slot.min_gen)
@@ -704,6 +722,7 @@ class TokSlot(Config):
                          or not 'false'.startswith(str(self.is_label).lower()))
         self.min_gen = int(self.min_gen)
         self.eos = None if self.eos in (None, 'None') else self.eos
+        self.eos_tokens = None
 
     def as_text(self):
         return f"#[{self.name}]#"

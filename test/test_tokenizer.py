@@ -322,10 +322,10 @@ with test('Dialogue Sequence with Large Truncation'):
 
 with test('Batch Dialogue Tokenization with Large Truncation'):
     dialogue2 = [
-        dict(temp='system_prompt', text='You are a helpful assistant.'),
+        dict(temp='system_prompt', text='You are helpful.'),
         dict(temp='document', text='France is a country.'),
-        dict(temp='user_instruction', text='Hi there, can you help?'),
-        dict(temp='assistant_response', text='Of course! How can I help you today?'),
+        dict(temp='user_instruction', text='Can you help?'),
+        dict(temp='assistant_response', text='Of course!'),
         dict(temp='user_instruction', text='What is the capital of France?'),
         dict(temp='assistant_response', text='It is Paris!'),
     ]
@@ -338,7 +338,7 @@ with test('Batch Dialogue Tokenization with Large Truncation'):
         dict(temp='assistant_response', text='The capital of France is Paris. Would you like to know more?'),
     ]
     dialogues = [dialogue, dialogue2, dialogue3]
-    temps = dc.replace(templates_with_truncation, pad_to_multiple_of=8, max_length=64)
+    temps = dc.replace(templates_with_truncation, max_length=81)
     tokens = temps.fill(dialogues)
     print(tokens.display())
 
