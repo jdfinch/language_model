@@ -24,9 +24,9 @@ def _imports(): pass
 default: T.Any = object()
 
 
-def get_tokenizer(tokenizer: str | PreTrainedTokenizer) -> PreTrainedTokenizer:
+def get_tokenizer(tokenizer: str | PreTrainedTokenizer, local_files_only=False) -> PreTrainedTokenizer:
     if isinstance(tokenizer, str):
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer, local_files_only=local_files_only)
     if tokenizer.pad_token_id is None:
         pad_token = '-'
         pad_token_id = tokenizer.convert_tokens_to_ids(pad_token)
@@ -36,8 +36,8 @@ def get_tokenizer(tokenizer: str | PreTrainedTokenizer) -> PreTrainedTokenizer:
 
 
 class Tokenizer:
-    def __init__(self, tokenizer: PreTrainedTokenizer|str):
-        self.tokenizer = get_tokenizer(tokenizer)
+    def __init__(self, tokenizer: PreTrainedTokenizer|str, local_files_only=False):
+        self.tokenizer = get_tokenizer(tokenizer, local_files_only=local_files_only)
             
     def templatize(self, 
         *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'] | dict[str, str|TokenTemplate],
@@ -49,6 +49,7 @@ class Tokenizer:
         pad_to_multiple_of: int = 8,
         pad_side: str = 'L',
         trunc_segments_side: str = 'L',
+        max_segments: int|None = None,
     ) -> T.Union['TokenTemplate', 'TokenTemplateCollection']:
         if sequence and isinstance(sequence[0], dict):
             return TokenTemplateCollection(
@@ -59,6 +60,7 @@ class Tokenizer:
                 pad_to_multiple_of=pad_to_multiple_of,
                 pad_side=pad_side,
                 trunc_segments_side=trunc_segments_side,
+                max_segments=max_segments,
                 tokenizer=self.tokenizer)
         else:
             return TokenTemplate(
@@ -88,6 +90,9 @@ class Tokenizer:
         else:
             return [TokenSequence(seq, is_attended=is_attended, is_label=is_label, tokenizer=self.tokenizer) 
                 for seqs in sequences for seq in seqs]
+
+    def decode(self, tokens: T.Union[int, list[int]]) -> str:
+        return self.tokenizer.decode(tokens, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         
         
 class _DisplaySettings:
@@ -279,15 +284,20 @@ class TokenTemplate(_DisplaySettings, list):
         tokenizer: PreTrainedTokenizer = None,
     ):
         self.tokenizer = tokenizer
-        self.is_attended = is_attended
-        self.is_label = is_label
+        self.is_attended = (
+            is_attended if not isinstance(is_attended, str) else 'TRUE'.startswith(is_attended.upper())) # noqa
+        self.is_label = (
+            is_label if not isinstance(is_label, str) else 'TRUE'.startswith(is_label.upper())) # noqa
         self.max_length = max_length
         self.min_length = min_length
         self.pad_to_same_length = pad_to_same_length
         self.pad_to_multiple_of = pad_to_multiple_of
-        self.pad_side = pad_side
-        self.trunc_segment = trunc_segment if isinstance(trunc_segment, bool) else 'TRUE'.startswith(trunc_segment.upper()) # noqa
-        self.trunc_content = trunc_content if isinstance(trunc_content, bool) else 'TRUE'.startswith(trunc_content.upper()) # noqa
+        self.pad_side = (
+            'L' if 'LEFT'.startswith(pad_side.upper()) else 'R' if 'RIGHT'.startswith(pad_side.upper()) else 'L')
+        self.trunc_segment = (
+            trunc_segment if not isinstance(trunc_segment, str) else 'TRUE'.startswith(trunc_segment.upper())) # noqa
+        self.trunc_content = (
+            trunc_content if not isinstance(trunc_content, str) else 'TRUE'.startswith(trunc_content.upper())) # noqa
         list.__init__(self)
         """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
         self.slots: dict[str, TokSlot] = {}
@@ -315,6 +325,8 @@ class TokenTemplate(_DisplaySettings, list):
                     if match:
                         arguments = dict(
                             [x.strip() for x in argument.split('=', 1)]
+                                if argument.strip().lower() not in ('input', 'output')
+                                else [argument.strip().lower(), argument.strip().lower()]
                             for argument in match.group(1).split(','))
                         if 'input' in arguments:
                             arguments['name'] = arguments.pop('input') # noqa
@@ -445,6 +457,8 @@ class TokenTemplate(_DisplaySettings, list):
         # convert slot values to TokenSequence object, keyed by slot name
         slot_subseqs = {} # slot name, value seq
         for slot_name, text_seq in slots.items():
+            if text_seq is None or text_seq is Ellipsis:
+                continue
             assert slot_name in self.slots, f"Slot {slot_name} not found in TokenTemplate."
             slot = self.slots[slot_name]
             text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
@@ -481,7 +495,7 @@ class TokenTemplate(_DisplaySettings, list):
         if end_of_filled is None:
             template_length = self.template_length()
         else:
-            template_length = end_of_filled + self[end_of_filled].min_gen
+            template_length = end_of_filled + self[end_of_filled].min_out
         current_length = sum(len(text_seq) for text_seq in slot_subseqs.values()) + template_length
         if max_length is not None and current_length > max_length:
             # truncate each slot value as much as possible (per-slot min is a floor) in order of trunc_rank until fit
@@ -567,6 +581,7 @@ class TokenTemplateCollection:
     pad_to_multiple_of: int = 8
     pad_side: str = 'L'
     trunc_segments_side: str = 'L'
+    max_segments: int|None = None
     tokenizer: str|PreTrainedTokenizer = None
 
     _truncation_strategy_pattern = re.compile(r"\((.*?)\)")
@@ -598,22 +613,40 @@ class TokenTemplateCollection:
         self.templates: dict[str, TokenTemplate] = self.templates
 
     def fill(self,
-        segments: list[dict[str, str|TokenSequence]] | list[list[dict[str, str|TokenSequence]]]
+        segments: T.Iterable[dict[str, str|TokenSequence]] | T.Iterable[T.Iterable[dict[str, str|TokenSequence]]]
     ) -> TokenSequence | TokenSequenceBatch:
         if any(isinstance(segment, dict) for segment in segments):
             return self._fill_single(segments)
         else:
             return self._fill_batch(segments)
 
-    def _fill_single(self, segments: list[dict[str, str|TokenSequence]]):
+    def _fill_single(self, segments: T.Iterable[dict[str, str|TokenSequence]]):
         # Get the template corresponding to each segment
         templates = [self.templates[seg['temp']] for seg in segments]
+        # Truncate entire segments based on max_segments
+        if self.max_segments is not None and len(templates) > self.max_segments:
+            num_segs_need_to_delete = len(templates) - self.max_segments
+            segs_to_delete = set()
+            if self.trunc_segments_side == 'R':
+                seg_iter = reversed(list(enumerate(templates)))
+            else:
+                seg_iter = enumerate(templates)
+            for i, template in seg_iter:
+                if template.trunc_segment:
+                    segs_to_delete.add(i)
+                    num_segs_need_to_delete -= 1
+                if num_segs_need_to_delete == 0:
+                    break
+            else:
+                raise ValueError(f"Could not truncate any segment to fit within max_segments {self.max_segments}.")
+            templates = [template for i, template in enumerate(templates) if i not in segs_to_delete]
+            segments = [segment for i, segment in enumerate(segments) if i not in segs_to_delete]
         # Convert all segment values to TokenSequence objects
         segments_no_temp = []
         for segment in segments:
             seg_no_temp = {}
             for slot_name, slot_value in segment.items():
-                if slot_name != 'temp':
+                if slot_name != 'temp' and slot_value not in (None, Ellipsis):
                     seg_no_temp[slot_name] = TokenSequence(slot_value, tokenizer=self.tokenizer)
             segments_no_temp.append(seg_no_temp)
         segments = segments_no_temp
@@ -630,7 +663,7 @@ class TokenTemplateCollection:
                         values_length += len(segment_values[slot_name]) + len(slot.eos_tokens or ())
                 else:
                     template_length = slot.index - j
-                    template_min_lengths.append(template_length + values_length + slot.min_gen)
+                    template_min_lengths.append(template_length + values_length + slot.min_out)
                     break
             else:
                 template_min_lengths.append(template_length + values_length)
@@ -683,7 +716,7 @@ class TokenTemplateCollection:
         total_filled = total_template.fill(total_values)
         return total_filled
 
-    def _fill_batch(self, segmentss: list[list[dict[str, str|TokenSequence]]]):
+    def _fill_batch(self, segmentss: T.Iterable[T.Iterable[dict[str, str|TokenSequence]]]):
         batch = TokenSequenceBatch(
             [self._fill_single(segments) for segments in segmentss],
             tokenizer=self.tokenizer,
@@ -704,7 +737,7 @@ class TokSlot(Config):
     trunc_rank: float = 1.0
     index: int = None
     is_label: bool = False
-    min_gen: int = 0
+    min_out: int = 0
     eos: str | None = ''
 
     def __post_init__(self):
@@ -720,7 +753,7 @@ class TokSlot(Config):
         self.trunc_rank = float(self.trunc_rank)
         self.is_label = (self.is_label and isinstance(self.is_label, bool)
                          or not 'false'.startswith(str(self.is_label).lower()))
-        self.min_gen = int(self.min_gen)
+        self.min_out = int(self.min_out)
         self.eos = None if self.eos in (None, 'None') else self.eos
         self.eos_tokens = None
 

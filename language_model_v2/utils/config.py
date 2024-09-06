@@ -32,12 +32,14 @@ def config(cls=None, **kwargs):
 
 F = T.TypeVar('F', bound=T.Callable)
 
+
 def defaults_from_self(method: F) -> F:
     sig = ins.signature(method)
+    @ft.wraps(method)
     def wrapper_method(self, *args, **kwargs):
         binding = sig.bind(self, *args, **kwargs)
         arguments = binding.arguments
-        from_self = {k: getattr(self, k) for k in sig.parameters if k not in arguments}
+        from_self = {k: getattr(self, k) for k in sig.parameters if k not in arguments and hasattr(self, k)}
         arguments.update(from_self)
         result = method(*binding.args, **binding.kwargs)
         return result

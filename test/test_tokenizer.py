@@ -338,7 +338,7 @@ with test('Batch Dialogue Tokenization with Large Truncation'):
         dict(temp='assistant_response', text='The capital of France is Paris. Would you like to know more?'),
     ]
     dialogues = [dialogue, dialogue2, dialogue3]
-    temps = dc.replace(templates_with_truncation, max_length=81)
+    temps = dc.replace(templates_with_truncation, max_length=90, pad_side='R')
     tokens = temps.fill(dialogues)
     print(tokens.display())
 
