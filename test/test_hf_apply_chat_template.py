@@ -1,6 +1,6 @@
 
 import transformers as hf
-from language_model_v2.utils.test import test
+from language_model.utils.test import test
 
 
 with test('Construct Tokenizers'):

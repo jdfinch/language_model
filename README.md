@@ -18,7 +18,7 @@ GPU usage will reach >30 GB for nontrivial model training on the smallest (7B) m
 ## Usage
 
 ```python
-from language_model.llama import Llama
+from language_model_old.llama import Llama
 
 llama = Llama(
     # Specify all hyperparameters here

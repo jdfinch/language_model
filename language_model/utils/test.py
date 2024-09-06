@@ -11,8 +11,8 @@ import traceback as tb
 import io
 import textwrap as tw
 import atexit as ae
-from language_model_v2.utils.timer import Timer
-import language_model_v2.utils.ansi as ansi
+from language_model.utils.timer import Timer
+import language_model.utils.ansi as ansi
 
 import typing as T
 

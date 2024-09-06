@@ -1,5 +1,5 @@
 
-from language_model_v2.prompt_format import prompt_format
+from language_model.prompt_format import prompt_format
 
 
 def SystemTurn(prompt):

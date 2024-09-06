@@ -5,8 +5,8 @@ import subprocess as sp
 import pathlib as pl
 
 with ez.CapturedVars() as models:
-    from language_model.llama import Llama
-    from language_model.t5 import T5
+    from language_model_old.llama import Llama
+    from language_model_old.t5 import T5
 
 alpha = lambda s: ''.join(c for c in s if c.isalpha() or c == ' ')
 

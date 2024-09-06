@@ -6,9 +6,9 @@ import re
 import collections as coll
 import itertools as it
 import functools as ft
-from language_model_v2.utils.config import config, Config
-from language_model_v2.utils.peek import peek
-from language_model_v2.utils import ansi
+from language_model.utils.config import config, Config
+from language_model.utils.peek import peek
+from language_model.utils import ansi
 
 # black magic type hinting of config as dataclass
 from dataclasses import dataclass; vars().update(dataclass=config)

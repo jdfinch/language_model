@@ -1,6 +1,6 @@
 import dataclasses as dc
-from language_model_v2.utils.test import test
-from language_model_v2.tokenizer import Tokenizer
+from language_model.utils.test import test
+from language_model.tokenizer import Tokenizer
 
 import textwrap as tw
 
