@@ -257,7 +257,7 @@ class TokenSequenceBatch(list):
         else:
             return list.__getitem__(self, item)
 
-    def dict(self, seq_type:type=list):
+    def dict(self, seq_type:type|callable=list):
         return dict(
             input_ids=seq_type([[t[0] for t in s] for s in self]),
             attention_mask=seq_type([[t[1] for t in s] for s in self]),

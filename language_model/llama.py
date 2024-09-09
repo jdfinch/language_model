@@ -8,11 +8,9 @@ import pathlib as pl
 import itertools as it
 import json
 import copy as cp
-from language_model.utils.config import config, Config, defaults_from_self
-from language_model.utils.batch import batched, batching
-from language_model.utils.bind import bind
-from language_model.utils.peek import peek
-from language_model.utils.default import default
+
+import ezpyzy as ez
+
 import language_model.llama3_format as llama3format
 import language_model.tokenizer as tok
 
@@ -21,11 +19,11 @@ import typing as T
 def _imports(): pass
 
 # black magic type hinting: sneak the "config" decorator into "dataclass" var name
-from dataclasses import dataclass; vars().update(dataclass=config)
+from dataclasses import dataclass; vars().update(dataclass=ez.config)
 
 
 @dataclass
-class LlamaHypers(Config):
+class LlamaHypers(ez.Config):
     """Configuration for a Llama model, representing all performance-affecting parameters."""
     model_to_load: str | None = None
     """Path to a custom model to load. The base will be used instead if this is None."""
@@ -46,7 +44,7 @@ class LlamaHypers(Config):
     """The dropout rate to use when training LoRA adapter weights."""
     lora_adapters: tuple = ()
     """EXPERIMENTAL, DO NOT TOUCH"""
-    format: dict = default({
+    format: dict = ez.default({
         'system (trunc_content=False, trunc_segment=False)':
             '''<|begin_of_text|><|start_header_id|>system<|end_header_id>\n\n#[input=text]#<|eot_id|>''',
         'user (trunc_content=False, trunc_segment=True)':
@@ -87,14 +85,18 @@ class LlamaHypers(Config):
     """The repetition penalty to use for generation."""
     num_beams: int = 1
     """The number of beams to use for generation."""
+    diverse_beam_groups: int = 1
+    """The number of diverse beam groups to use for diverse beam search."""
     temperature: float = 0.6
     """The temperature to use for generation."""
     sampled_generation: bool = False
     """Whether to use sampled generation instead of beam search."""
     top_p: float = 0.9
     """The top-p value to use for generation."""
+    penalty_alpha: float = 0
+    """The penalty alpha value to use for contrastive decoding."""
     top_k: int = 50
-    """The top-k value to use for generation."""
+    """The top-k value to use for contrastive decoding."""
     tokenizer_id: str = None
     """The repository ID of the tokenizer to use. If None, the tokenizer will be loaded from the base ID."""
 
@@ -164,6 +166,10 @@ class LlamaConfig(LlamaHypers):
     """The side to pad sequences on. 'L' for left, 'R' for right."""
     pad_to_multiple_of: int = 8
     """Pads sequences so that total sequence lengths are a multiple of this value, which can improve performance on GPU."""
+    # tokenization_num_processes: int|float = 1
+    # """The number of processes to use for tokenization. Inputting a float will use that fraction of the available CPUs. Strangely, setting this to 2.0 (double the CPUs) is sometimes fastest."""
+    # tokenization_batches_per_chunk: int|None = None
+    # """The number of batches a single process will tokenize for multiprocessed tokenization. Tune for more fast."""
     gen_batch_size: int = None
     """The batch size to use for generation. Defaults to the actual train batch size."""
     ppl_batch_size: int = 1
@@ -247,7 +253,7 @@ class Llama(LlamaConfig):
     def save(self, path: str|pl.Path=None, save_as_checkpoint=False):
         return super().save(path)
 
-    @defaults_from_self
+    @ez.take_defaults_from_self
     def preprocess(self,
         sequences: T.Iterable[T.Iterable[dict[str, str]]],
         batch_size: int = None,
@@ -255,7 +261,9 @@ class Llama(LlamaConfig):
         pad_to_multiple_of: int = None,
         pad_side: str = None,
         trunc_segments_side: str = None,
-        max_segments: int = None
+        max_segments: int = None,
+        # tokenization_num_processes: int = None,
+        # tokenization_batches_per_chunk: int = None,
     ) -> list[tok.TokenSequenceBatch]:
         template = cp.copy(self.template)
         template.max_length = max_sequence_length
@@ -266,11 +274,11 @@ class Llama(LlamaConfig):
         if batch_size is None:
             batches = [sequences]
         else:
-            batches = batched(sequences, batch_size)
-        preprocessed = [self.template.fill(batch) for batch in batches]
+            batches = ez.batched(sequences, batch_size)
+        preprocessed = [template.fill(batch) for batch in batches]
         return preprocessed
 
-    @defaults_from_self
+    @ez.take_defaults_from_self
     def generate(self,
         sequences: T.Iterable[T.Iterable[dict[str, str]]],
         max_sequence_length: int = None,
@@ -280,12 +288,13 @@ class Llama(LlamaConfig):
         max_segments: int = None,
         gen_batch_size: int = None,
         num_beams: int = None,
+        diverse_beam_groups: int = None,
         temperature: float = None,
         sampled_generation: bool = None,
         top_p: float = None,
+        penalty_alpha: float = None,
         top_k: int = None,
         repetition_penalty: float = None,
-
     ):
         batches = self.preprocess(
             sequences,
@@ -295,13 +304,27 @@ class Llama(LlamaConfig):
             pad_side=pad_side,
             trunc_segments_side=trunc_segments_side,
             max_segments=max_segments)
-        generation_config = hf.GenerationConfig(
-            max_length=max_sequence_length,
-            pad_token_id=self.tokenizer.tokenizer.pad_token_id,
-        )
+        if sampled_generation:
+            generation_config = hf.GenerationConfig(
+                max_length=max_sequence_length,
+                pad_token_id=self.tokenizer.tokenizer.pad_token_id,
+                do_sample=sampled_generation,
+                num_beams=num_beams,
+                diverse_beam_groups=diverse_beam_groups,
+                temperature=temperature,
+                top_p=top_p,
+                penalty_alpha=penalty_alpha,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty)
+        else:
+            generation_config = hf.GenerationConfig(
+                max_length=max_sequence_length,
+                pad_token_id=self.tokenizer.tokenizer.pad_token_id,
+                do_sample=sampled_generation,
+                num_beams=num_beams)
         generated_results = []
         for batch in batches:
-            tokens = batch.dict(seq_type=bind(pt.tensor)(dtype=pt.long, device=self.device)) # noqa
+            tokens = batch.dict(seq_type=ez.bind(pt.tensor)(dtype=pt.long, device=self.device))
             outputs = self.model.generate(**tokens, generation_config=generation_config)
             generated_tokens = [output[len(input):] for input, output in zip(batch, outputs)]
             generated_texts = [self.tokenizer.decode(tokens) for tokens in generated_tokens]
@@ -326,12 +349,13 @@ if __name__ == '__main__':
         dict(temp='assistant', text='France is a country of no importance.'),
         dict(temp='user', text='Thank you!'),
         dict(temp='assistant', text=None),
-    ]]
+    ]] * (2 // 2)
 
-    preprocessed = llama.preprocess(dialogues)
+    with ez.Timer('preprocess'):
+        preprocessed = llama.preprocess(dialogues, batch_size=4)
     print(preprocessed[0].display())
-    generated = llama.generate(dialogues)
-    print('\n\n'.join(generated))
+    # generated = llama.generate(dialogues)
+    # print('\n\n'.join(generated))
 
 
 
