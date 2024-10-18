@@ -16,16 +16,16 @@ def config(cls=None, **kwargs):
     init = getattr(cls, '__init__', lambda self: None)
     init_sig = ins.signature(init)
     def __init__(self, *args, **kwargs):
-        self.__default__ = {
+        self.defaults = {
             **{p.name: p.default for p in init_sig.parameters.values() if p.default is not p.empty},
             **{f.name: f.default for f in dc.fields(cls) if f.default is not dc.MISSING},
             **{f.name: f.default_factory() for f in dc.fields(cls) if f.default_factory is not dc.MISSING},
         }
         bound = init_sig.bind(self, *args, **kwargs).arguments
-        self.__config__ = {k: v for i, (k, v) in enumerate(bound.items()) if i}
+        self.args = {k: v for i, (k, v) in enumerate(bound.items()) if i}
         init(self, *args, **kwargs) # noqa
-        del self.__config__
-        del self.__default__
+        del self.args
+        del self.defaults
     cls.__init__ = __init__
     return cls
 

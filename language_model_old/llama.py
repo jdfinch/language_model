@@ -155,7 +155,7 @@ class Llama(LlamaHyperparameters):
         if delete_merge_path is not None:
             shutil.rmtree(delete_merge_path, ignore_errors=True)
         self.model.resize_token_embeddings(len(self.tokenizer))
-        self.model.config.use_cache = False
+        self.model.base.use_cache = False
         self.acclerator = Accelerator(gradient_accumulation_steps=self.gradient_accumulation_steps)
         assert self.train_batch_size % self.gradient_accumulation_steps == 0
         if self.gen_batch_size is None:
