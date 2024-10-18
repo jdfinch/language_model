@@ -73,6 +73,12 @@ class TokenSequence:
         else:
             return tokens
 
+    def ansi(self):
+        return TokenPrinter().ansi(self)
+
+    def display(self):
+        return f"{ansi.bold}{self.__class__.__name__} with {len(self)} tokens:{ansi.reset}\n{self.ansi()}"
+
     def __add__(self, other):
         copy = cp.copy(self)
         copy.sequence = copy.sequence + other.sequence
@@ -103,9 +109,6 @@ class TokenSequence:
 
     def __repr__(self):
         return f"TokenSequence({repr(self.sequence)})"
-
-    def display(self):
-        return TokenPrinter().ansi(self)
 
 
 class TokenSequences:
@@ -169,6 +172,12 @@ class TokenSequences:
         """Returns the decoded text for all sequences."""
         return [seq.text() for seq in self.sequences]
 
+    def ansi(self):
+        return TokenPrinter().ansi(self)
+
+    def display(self):
+        return f"{ansi.bold}{self.__class__.__name__} with {len(self)} sequences:{ansi.reset}\n{self.ansi()}"
+
     def dict(self, seq_type: type|callable = list):
         """Returns the input_ids, attention_mask, and labels for all sequences."""
         return dict(
@@ -183,12 +192,7 @@ class TokenSequences:
         return len(self.sequences)
 
     def __getitem__(self, index):
-        if isinstance(index, slice):
-            copy = cp.copy(self)
-            copy.sequences = self.sequences[index]
-            return copy
-        else:
-            return self.sequences[index]
+        return self.sequences[index]
 
     def __setitem__(self, index, value):
         if isinstance(value, TokenSequence):
@@ -373,7 +377,13 @@ class TokenTemplate:
         return self
     __iadd__ = extend
 
-    def fill(self, slots: dict[str, str|TokenSequence]):
+    def fill(self, slots: dict[str, str|TokenSequence]|T.Iterable[dict[str, str|TokenSequence]]):
+        if not isinstance(slots, dict):
+            return TokenSequences([self.fill(slot) for slot in slots],
+                pad_to_same_length=self.pad_to_same_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side,
+                tokenizer=self.tokenizer)
         assert all(slot in self.slots for slot in slots), \
             f"Slots {set(slots) - set(self.slots)} not found in TokenSequence."
         filled = []
@@ -463,6 +473,14 @@ class TokenTemplate:
     def tokens(self):
         return [str(t) if isinstance(t, TokenSlot) else self.tokenizer.decode(t[0]) for t in self]
 
+    def ansi(self):
+        return TokenPrinter().ansi(self)
+
+    def display(self):
+        return (f"{ansi.bold}{self.__class__.__name__} "
+                f"with {self.template_length()} tokens "
+                f"and {len(self.slots)} slots:{ansi.reset}\n{self.ansi()}")
+
     def __iter__(self):
         return iter(self.sequence)
 
@@ -485,7 +503,7 @@ class TokenTemplate:
             return f'<TokenTemplate len {len(self)}: {"|".join(tokens)}>' # noqa
 
     def __repr__(self):
-        return f"TokenSequence({repr(self.sequence)})"
+        return f"TokenTemplate({repr(self.sequence)})"
 
 
 
@@ -512,19 +530,22 @@ class TokenPrinter:
         token_texts = tokens.tokens()
         token_types = [type(token) for token in tokens]
         for token, token_text, token_type in zip(tokens, token_texts, token_types):
+            styles = []
             if token_type is tuple:
                 token_id, is_attended, is_label = token
-                token_color = next(token_color_iter)
+                token_color = ansi.color(*next(token_color_iter)).bg
+                if not is_attended:
+                    padding_color = ansi.color(*self.padding_color).fg
+                    styles.append(padding_color)
             elif issubclass(token_type, TokenSlot):
                 is_label = token.is_label
-                token_color = self.slot_color
+                token_color = ansi.color(*self.slot_color).bg
             else:
                 raise ValueError(f"Token type {token_type} for displaying token {token} is not recognized.")
+            styles.append(token_color)
             if is_label:
-                label_ansi = (ansi.color(*self.label_color).fg, self.label_style)
-            else:
-                label_ansi = ()
-            ansi_style = ''.join((ansi.color(*token_color).bg, *label_ansi))
+                styles.extend((ansi.color(*self.label_color).fg, self.label_style))
+            ansi_style = ''.join(styles)
             token_display = f'{ansi_style}{token_text}{ansi.reset}'.replace(
                 '\n', f'↵{ansi.reset}\n{ansi_style}')
             display.append(token_display)
@@ -537,10 +558,17 @@ class TokenPrinter:
 
 if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.2-3B-Instruct')
+    tokenizer.pad_token = '-'
+    tokenizer.pad_token_id, = tokenizer.encode('-', add_special_tokens=False)
     class LlamaTemplate(TokenTemplate): tokenizer = tokenizer
     template = LlamaTemplate("Hello, world!\nTesting.")
     extension = LlamaTemplate(" This is a\n\n#[input, max=5]#. #[output]#")
     template += extension
-    TokenPrinter(template)
-    tokens = template.fill(dict(input='sentence with many words', output='OK!'))
-    TokenPrinter(tokens)
+    print(template.display(), '\n')
+    tokens = template.fill([
+        dict(input='sentence with many words', output='OK!'),
+        dict(input='short', output='short'),
+        dict(input='a really really long sentence with many words', output='OK!'),
+    ])
+    for token in tokens:
+        print(token.display(), '\n')
