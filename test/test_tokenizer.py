@@ -33,7 +33,7 @@ with test('Construct Token Templates'):
     print(ll2_template.display())
 
 
-with test('Fill Input Only'):
+with test('Fill InputSlot Only'):
     ll3_input = ll3_template.fill(q='What is the capital of France?')
     print(ll3_input.display())
 
@@ -45,7 +45,7 @@ with test('Fill Input Only'):
     assert ll3_input.tokens()[-1] != '<|eot_id|>'
 
 
-with test('Fill Input and Output'):
+with test('Fill InputSlot and OutputSlot'):
     ll3_input_output = ll3_template.fill(q='What is the capital of France?', a='Paris')
     print(ll3_input_output.display())
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import inspect
 import re
 import collections as coll
 import itertools as it
 import functools as ft
+import textwrap as tw
 import copy as cp
 from language_model.utils.config import config, Config
 from language_model.utils.peek import peek
@@ -237,13 +239,13 @@ class TokenSlot:
             elif args and args[0].startswith('type='):
                 type = args.pop(0)[5:]
             else:
-                type = 'Input'
+                type = 'InputSlot'
             if type.lower() == 'input':
-                self.__class__ = Input
-                vars(self).update(vars(Input()))
+                self.__class__ = InputSlot
+                vars(self).update(vars(InputSlot()))
             elif type.lower() == 'output':
-                self.__class__ = Output
-                vars(self).update(vars(Output()))
+                self.__class__ = OutputSlot
+                vars(self).update(vars(OutputSlot()))
             args = {var.strip(): val.strip() for var, val in (arg.split('=') for arg in args)}
             vars(self).update(args)
             if space:
@@ -277,7 +279,7 @@ class TokenSlot:
         return f"TokenSlot({', '.join(params)})"
 
 @dc.dataclass
-class Input(TokenSlot):
+class InputSlot(TokenSlot):
     name: str = 'input'
     is_label: bool = False
     max: int = None
@@ -289,7 +291,7 @@ class Input(TokenSlot):
     suffix: str|type[EOS] = ''
 
 @dc.dataclass
-class Output(TokenSlot):
+class OutputSlot(TokenSlot):
     name: str = 'output'
     is_label: bool = True
     max: int = None
@@ -299,6 +301,32 @@ class Output(TokenSlot):
     min_out: int = 0
     prefix: str = ''
     suffix: str|type[EOS] = EOS
+
+def Input(
+    name: str = 'input',
+    is_label: bool = False,
+    max: int = None,
+    min: int = 0,
+    trunc_side: str = 'L',
+    trunc_rank: float = 1.0,
+    min_out: int = 0,
+    prefix: str = '',
+    suffix: str|type[EOS] = '',
+) -> str:
+    return InputSlot(name, is_label, max, min, trunc_side, trunc_rank, min_out, prefix, suffix) # noqa
+
+def Output(
+    name: str = 'output',
+    is_label: bool = True,
+    max: int = None,
+    min: int = 0,
+    trunc_side: str = 'R',
+    trunc_rank: float = 1.0,
+    min_out: int = 0,
+    prefix: str = '',
+    suffix: str|type[EOS] = EOS,
+) -> str:
+    return OutputSlot(name, is_label, max, min, trunc_side, trunc_rank, min_out, prefix, suffix) # noqa
 
 
 slot_regex = re.compile(r" ?#\[(.*?)]#")
@@ -506,6 +534,150 @@ class TokenTemplate:
         return f"TokenTemplate({repr(self.sequence)})"
 
 
+class TokenTemplates:
+    tokenizer = None
+
+    def __init__(self,
+        max_length: int|None = None,
+        pad_to_same_length: bool = True,
+        pad_to_multiple_of: int = 8,
+        pad_side: str = 'L',
+        trunc_segments_side: str = 'L',
+        max_segments: int | None = None,
+        tokenizer: str | PreTrainedTokenizer = None,
+    ):
+        self.templates: dict[str, TokenTemplate] = {}
+        self.max_length = max_length
+        self.pad_to_same_length = pad_to_same_length
+        self.pad_to_multiple_of = pad_to_multiple_of
+        self.pad_side = pad_side
+        self.trunc_segments_side = trunc_segments_side
+        self.max_segments = max_segments
+        self.tokenizer = type(self).tokenizer if tokenizer is None else tokenizer
+        assert self.tokenizer is not None, "A tokenizer must be provided to TokenTemplates."
+
+    def add(self, templates=None, /, **templates_):
+        templates = (templates or {}) | templates_
+        for name, template in templates.items():
+            assert name not in self.templates, f"Template name {name} already exists in TokenTemplates."
+            self.templates[name] = template
+
+    def fill(self,
+        segments: T.Iterable[T.Iterable[dict[str, str|TokenSequence]]]
+                  |T.Iterable[dict[str, str|TokenSequence]]
+    ):
+        first, segments = peek(segments)
+        if not isinstance(first, dict):
+            return TokenSequences([self.fill(seg) for seg in segments],
+                pad_to_same_length=self.pad_to_same_length,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+                pad_side=self.pad_side,
+                tokenizer=self.tokenizer)
+        assert all('temp' in seg for seg in segments), \
+            "All segments must have a 'temp' key to define which template to use."
+        # Get the template corresponding to each segment
+        try: templates = [self.templates[seg['temp']] for seg in segments]
+        except KeyError as e: raise ValueError(f"Template {e} not found in TokenTemplates.")
+        # Truncate entire segments based on max_segments
+        if self.max_segments is not None and len(templates) > self.max_segments:
+            num_segs_need_to_delete = len(templates) - self.max_segments
+            segs_to_delete = set()
+            if self.trunc_segments_side == 'R':
+                seg_iter = reversed(list(enumerate(templates)))
+            else:
+                seg_iter = enumerate(templates)
+            for i, template in seg_iter:
+                if template.trunc_segment:
+                    segs_to_delete.add(i)
+                    num_segs_need_to_delete -= 1
+                if num_segs_need_to_delete == 0:
+                    break
+            else:
+                raise ValueError(f"Could not truncate any segment to fit within max_segments {self.max_segments}.")
+            templates = [template for i, template in enumerate(templates) if i not in segs_to_delete]
+            segments = [segment for i, segment in enumerate(segments) if i not in segs_to_delete]
+        # Convert all segment values to TokenSequence objects
+        segments_no_temp = []
+        for segment in segments:
+            seg_no_temp = {}
+            for slot_name, slot_value in segment.items():
+                if slot_name != 'temp' and slot_value not in (None, Ellipsis):
+                    seg_no_temp[slot_name] = TokenSequence(slot_value, tokenizer=self.tokenizer)
+            segments_no_temp.append(seg_no_temp)
+        segments = segments_no_temp
+        # Caclulate the minimum possible length of each segment after filling its template
+        template_min_lengths = []
+        for i, (template, segment_values) in enumerate(zip(templates, segments)):
+            template_length = template.template_length()
+            values_length = 0
+            for j, (slot_name, slot) in enumerate(template.slots.items()):
+                if slot_name in segment_values:
+                    if template.trunc_content:
+                        values_length += min(len(segment_values[slot_name]), slot.min or 0)
+                    else:
+                        values_length += len(segment_values[slot_name]) + len(slot.eos_tokens or ())
+                else:
+                    template_length = slot.index - j
+                    template_min_lengths.append(template_length + values_length + slot.min_out)
+                    break
+            else:
+                template_min_lengths.append(template_length + values_length)
+                continue
+            break
+        # Find which segments must be removed to satisfy the max_length constraint
+        total_min_length = sum(template_min_lengths)
+        if self.max_length is not None and total_min_length > self.max_length:
+            deleted = set()
+            if self.trunc_segments_side == 'R':
+                templates_values_minlens = reversed(list(enumerate(zip(templates, segments, template_min_lengths))))
+            else:
+                templates_values_minlens = enumerate(zip(templates, segments, template_min_lengths))
+            for i, (template, segment_values, template_min_length) in templates_values_minlens:
+                if self.max_length is None or total_min_length < self.max_length:
+                    break
+                if template.trunc_segment:
+                    deleted.add(i)
+                    total_min_length -= template_min_length
+            else:
+                raise ValueError(f"Could not truncate any segment to fit within max_length {self.max_length}.")
+            templates_and_values = [
+                (template, segment_values)
+                for i, (template, segment_values, _) in enumerate(zip(templates, segments, template_min_lengths))
+                if i not in deleted]
+        else:
+            templates_and_values = list(zip(templates, segments))
+        # Build a megatemplate by appending the segment index to each slot name
+        total_template = TokenTemplate(
+            max_length=self.max_length,
+            pad_to_same_length=False,
+            pad_to_multiple_of=1,
+            tokenizer=self.tokenizer)
+        total_values = {}
+        for i, (template, values) in enumerate(templates_and_values):
+            offset = len(total_template)
+            total_template += template
+            for slot_name, slot in template.slots.items():
+                i_slot_name = f"{slot_name}__{i}"
+                total_template.slots[i_slot_name] = dc.replace(slot,
+                    name=i_slot_name,
+                    index=offset + slot.index,
+                    trunc_rank=slot.trunc_rank if template.trunc_content else float('+inf'))
+                if slot_name in values:
+                    total_values[i_slot_name] = values[slot_name]
+        # Fill the megatemplate with the segment values
+        total_filled = total_template.fill(total_values)
+        return total_filled
+
+    def __str__(self):
+        return f'<TokenTemplates with {len(self.templates)} templates>'
+
+    def __repr__(self):
+        return f"TokenTemplates({repr(self.templates)})"
+
+    def display(self):
+        return '\n\n'.join(
+            f"{ansi.bold}{name}{ansi.reset}:\n{template.display()}"
+            for name, template in self.templates.items())
 
 
 @dc.dataclass
@@ -555,15 +727,192 @@ class TokenPrinter:
         print(self.ansi(tokens))
 
 
+############################################################################################
+
+
+FullSequence = T.TypeVar('FullSequence')
+
+F = T.TypeVar('F')
+
+class TemplateWrapper(T.Generic[F]):
+    def __init__(self, sequence, template, signature):
+        self.sequence: Tokens = sequence
+        self.template = template
+        self.signature: inspect.Signature = signature
+
+    def __call__(self, *args, **kwargs):
+        bound = self.signature.bind(*args, **kwargs)
+        as_dict = bound.arguments
+        self.sequence.segments.append((self.template, as_dict))
+        return self.sequence
+
+M = T.TypeVar('M')
+
+def template(
+    trunc_content=True,
+    trunc_segment=False,
+) -> T.Callable[[M], M]:
+    def decorator(fn: M) -> M:
+        fn = classmethod(fn)
+        fn.template = True
+        fn.trunc_content = trunc_content
+        fn.trunc_segment = trunc_segment
+        return fn
+    return decorator
+
+
+class TokensMeta(type):
+    templates: TokenTemplates = None
+    def __new__(cls, name, bases, namespace):
+        cls = super().__new__(cls, name, bases, namespace)
+        cls.templates = TokenTemplates()
+        for base in bases:
+            if base_templates:=getattr(base, 'templates', None):
+                if isinstance(base_templates, TokenTemplates):
+                    cls.templates.add(base_templates.templates)
+        for attr, method in namespace.items():
+            if getattr(method, 'template', False):
+                signature = inspect.signature(method)
+                parameters = signature.parameters
+                for name, param in list(parameters.items())[1:]:
+                    slot = param.default
+                    assert isinstance(slot, TokenSlot), \
+                        f"Template method {attr} parameter {name} must have a TokenSlot object as a default arg, got {slot}. Use Input() or Output() to create a TokenSlot object for all default args."
+                try: template_text: str = method(cls)
+                except Exception as e:
+                    raise ValueError(f"Failed to generate template text for method {attr} in class {cls} with error: {e}. Make sure the method returns a string and does not rely on any values of self, as the class object will be passed to the self parameter for template discovery.")
+                assert isinstance(template_text, str), \
+                    f"Template method {attr} must return a string, got {template_text}."
+                tokentemplate = TokenTemplate(template_text,
+                    trunc_content=method.trunc_content,
+                    trunc_segment=method.trunc_segment)
+                method.template = tokentemplate
+                method.signature = signature
+        return cls
+
+
+class Tokens(metaclass=TokensMeta):
+    def __init__(self):
+        self.sequences: list[TokenSequence] = []
+        self.segments: list[tuple[TokenTemplate, dict[str, str]]] = []
+        for attr, method in self.__class__.__dict__.items():
+            if template:=getattr(method, 'template', False):
+                template_wrapper = TemplateWrapper(self, template, method.signature)
+                setattr(self, attr, template_wrapper)
+
+    def tokens(self) -> TokenSequence:
+        return self.templates.fill(self.segments)
+
+
+class Templates:
+    def __init__(self):
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if callable(attr) and (is_template:=getattr(attr, 'template', False)):
+                ...
+
+ISlotType = str | TokenSlot
+
+@T.dataclass_transform
+def make_template(cls):
+    return cls
+
+
+'''Library'''
+
+@dc.dataclass
+class Template:
+    def __call__(self, **kwargs):
+        return kwargs
+
+@dc.dataclass
+class SystemTemplate(Template):
+    template = "<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
+    prompt: ISlotType = InputSlot(); date: ISlotType = InputSlot()
+
+@dc.dataclass
+class UserTemplate:
+    template = "<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
+    input: ISlotType = InputSlot()
+
+@dc.dataclass
+class LlamaTemplates:
+    system: SystemTemplate = SystemTemplate()
+    user: UserTemplate = UserTemplate()
+
+
+'''Approach'''
+
+@dc.dataclass
+class MyDSTTemplate:
+    template = "{slot}: {description}"
+    slot: ISlotType = InputSlot(); description: ISlotType = InputSlot(max=128)
+
+@dc.dataclass
+class MyLlamaTemplates(LlamaTemplates):
+    dst: MyDSTTemplate = MyDSTTemplate()
+
+def experiment():
+    my_templates = MyLlamaTemplates(
+        system=SystemTemplate(prompt=InputSlot(max=128)),
+        dst=MyDSTTemplate(description=InputSlot(max=64))
+    )
+
+    my_dialogue = [
+        SystemTemplate('track the dialogue', date='oct 8'),
+        UserTemplate('I went to Cambridge Station at 6'),
+        MyDSTTemplate(slot='time', description='the time')
+    ]
+
+    filled = my_templates.fill(my_dialogue)
+
+
+
+class LlamaTokens(Tokens):
+
+    @template()
+    def system(self, prompt=Input(), date=Input()) -> T.Self:
+        return f"<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
+
+    @template()
+    def user(self, input=Input()) -> T.Self:
+        return f"<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
+
+
+
+class MyLlamaTokens(LlamaTokens):
+
+    def system(self, prompt=Input(max=128), date=Input()) -> T.Self:
+        return super().system(prompt, date)
+
+    @template()
+    def dst(cls, slot=Input(), description=Input(), examples=Input()) -> T.Self:
+        return cls.user(input=f"Define the slot {slot}: {description} ({examples})")
+
+
+my_prompt = MyLlamaTokens().system(
+    prompt="You are a helpful assistant.", date='Friday October 18, 2024'
+).user(
+    input="What is the weather like today?"
+).dst(
+    'weather', 'The current weather.', 'What is the weather like today?'
+)
+
+llama = ...
+
+llama.generate(my_prompt)
+
 
 if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.2-3B-Instruct')
     tokenizer.pad_token = '-'
     tokenizer.pad_token_id, = tokenizer.encode('-', add_special_tokens=False)
+
     class LlamaTemplate(TokenTemplate): tokenizer = tokenizer
-    template = LlamaTemplate("Hello, world!\nTesting.")
-    extension = LlamaTemplate(" This is a\n\n#[input, max=5]#. #[output]#")
-    template += extension
+
+    template = LlamaTemplate(
+        f"<|start_header_id|>system<|end_header_id|>\n\n{InputSlot('instruction', max=128)}<|eot_id|>")
+
     print(template.display(), '\n')
     tokens = template.fill([
         dict(input='sentence with many words', output='OK!'),

@@ -299,7 +299,7 @@ class TokenTemplate(_DisplaySettings, list):
         self.trunc_content = (
             trunc_content if not isinstance(trunc_content, str) else 'TRUE'.startswith(trunc_content.upper())) # noqa
         list.__init__(self)
-        """Tokens as (id, str, is_attended, is_label) tuples. Input/OutputSequence objects represent slots to fill in the sequence with input/output text."""
+        """Tokens as (id, str, is_attended, is_label) tuples. InputSlot/OutputSequence objects represent slots to fill in the sequence with input/output text."""
         self.slots: dict[str, TokSlot] = {}
         for sequence in sequence:
             if isinstance(sequence, TokenTemplate):
