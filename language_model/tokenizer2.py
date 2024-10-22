@@ -730,177 +730,90 @@ class TokenPrinter:
 ############################################################################################
 
 
-FullSequence = T.TypeVar('FullSequence')
-
-F = T.TypeVar('F')
-
-class TemplateWrapper(T.Generic[F]):
-    def __init__(self, sequence, template, signature):
-        self.sequence: Tokens = sequence
-        self.template = template
-        self.signature: inspect.Signature = signature
-
-    def __call__(self, *args, **kwargs):
-        bound = self.signature.bind(*args, **kwargs)
-        as_dict = bound.arguments
-        self.sequence.segments.append((self.template, as_dict))
-        return self.sequence
-
-M = T.TypeVar('M')
-
-def template(
-    trunc_content=True,
-    trunc_segment=False,
-) -> T.Callable[[M], M]:
-    def decorator(fn: M) -> M:
-        fn = classmethod(fn)
-        fn.template = True
-        fn.trunc_content = trunc_content
-        fn.trunc_segment = trunc_segment
-        return fn
-    return decorator
-
-
-class TokensMeta(type):
-    templates: TokenTemplates = None
-    def __new__(cls, name, bases, namespace):
-        cls = super().__new__(cls, name, bases, namespace)
-        cls.templates = TokenTemplates()
-        for base in bases:
-            if base_templates:=getattr(base, 'templates', None):
-                if isinstance(base_templates, TokenTemplates):
-                    cls.templates.add(base_templates.templates)
-        for attr, method in namespace.items():
-            if getattr(method, 'template', False):
-                signature = inspect.signature(method)
-                parameters = signature.parameters
-                for name, param in list(parameters.items())[1:]:
-                    slot = param.default
-                    assert isinstance(slot, TokenSlot), \
-                        f"Template method {attr} parameter {name} must have a TokenSlot object as a default arg, got {slot}. Use Input() or Output() to create a TokenSlot object for all default args."
-                try: template_text: str = method(cls)
-                except Exception as e:
-                    raise ValueError(f"Failed to generate template text for method {attr} in class {cls} with error: {e}. Make sure the method returns a string and does not rely on any values of self, as the class object will be passed to the self parameter for template discovery.")
-                assert isinstance(template_text, str), \
-                    f"Template method {attr} must return a string, got {template_text}."
-                tokentemplate = TokenTemplate(template_text,
-                    trunc_content=method.trunc_content,
-                    trunc_segment=method.trunc_segment)
-                method.template = tokentemplate
-                method.signature = signature
-        return cls
-
-
-class Tokens(metaclass=TokensMeta):
-    def __init__(self):
-        self.sequences: list[TokenSequence] = []
-        self.segments: list[tuple[TokenTemplate, dict[str, str]]] = []
-        for attr, method in self.__class__.__dict__.items():
-            if template:=getattr(method, 'template', False):
-                template_wrapper = TemplateWrapper(self, template, method.signature)
-                setattr(self, attr, template_wrapper)
-
-    def tokens(self) -> TokenSequence:
-        return self.templates.fill(self.segments)
-
-
-class Templates:
-    def __init__(self):
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
-            if callable(attr) and (is_template:=getattr(attr, 'template', False)):
-                ...
-
-ISlotType = str | TokenSlot
-
-@T.dataclass_transform
-def make_template(cls):
-    return cls
-
 
 '''Library'''
 
+Slot = str | TokenSlot
+
 @dc.dataclass
 class Template:
-    def __call__(self, **kwargs):
-        return kwargs
+    trunc_content = True
+    trunc_segment = False
+
+    def __call__(self, *args, **kwargs):
+        return self.__class__(*args, **kwargs) # noqa
+
+@dc.dataclass
+class Templates:
+    max_length: int = None
+    pad_to_same_length: bool = True
+    pad_to_multiple_of: int = 8
+    pad_side: str = 'L'
+    trunc_segments_side: str = 'L'
+    max_segments: int | None = None
+
+    def __post_init__(self):
+        for name, field in dc.asdict(self):
+            if issubclass(field, Template):
+                setattr(self, name, field())
+            if isinstance(field, Template):
+                for slot_name, slot in dc.asdict(field):
+                    assert isinstance(slot, Slot), \
+                    f"When constructing a Templates collection, every template must be a Template object with Slot objects for all fields. However, got {slot} for slot {slot_name} in template {name}: {field}."
+
+    def fill(self, values: T.Iterable[Template]) -> TokenSequence:
+        ...
+
+    def fill_batch(self, values: T.Iterable[T.Iterable[Template]]) -> TokenSequences:
+        ...
+
+    def batch(self, values: T.Iterable[T.Iterable[Template]], batch_size: int) -> list[TokenSequences]:
+        ...
+
 
 @dc.dataclass
 class SystemTemplate(Template):
     template = "<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
-    prompt: ISlotType = InputSlot(); date: ISlotType = InputSlot()
+    prompt: Slot = InputSlot(); date: Slot = InputSlot()
 
 @dc.dataclass
 class UserTemplate:
     template = "<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
-    input: ISlotType = InputSlot()
+    input: Slot = InputSlot()
 
 @dc.dataclass
-class LlamaTemplates:
-    system: SystemTemplate = SystemTemplate()
-    user: UserTemplate = UserTemplate()
+class LlamaTemplates(Templates):
+    system: SystemTemplate = SystemTemplate
+    user: UserTemplate = UserTemplate
 
 
 '''Approach'''
 
 @dc.dataclass
 class MyDSTTemplate:
-    template = "{slot}: {description}"
-    slot: ISlotType = InputSlot(); description: ISlotType = InputSlot(max=128)
+    template = UserTemplate(input="{slot}: {description}")
+    slot: Slot = InputSlot(); description: Slot = InputSlot(max=128)
 
 @dc.dataclass
 class MyLlamaTemplates(LlamaTemplates):
-    dst: MyDSTTemplate = MyDSTTemplate()
+    dst: MyDSTTemplate = MyDSTTemplate
 
 def experiment():
     my_templates = MyLlamaTemplates(
-        system=SystemTemplate(prompt=InputSlot(max=128)),
-        dst=MyDSTTemplate(description=InputSlot(max=64))
+        system=SystemTemplate(prompt=InputSlot(min=64, max=128)),
+        dst=MyDSTTemplate(description=InputSlot(max=64)),
+        max_length=512,
+        pad_to_multiple_of=16,
     )
 
     my_dialogue = [
-        SystemTemplate('track the dialogue', date='oct 8'),
-        UserTemplate('I went to Cambridge Station at 6'),
-        MyDSTTemplate(slot='time', description='the time')
+        MyLlamaTemplates.system('track the dialogue', date='oct 8'),
+        MyLlamaTemplates.user('I went to the station at 5'),
+        MyLlamaTemplates.dst(slot='time', description='the time'),
+        my_templates.system(prompt='track the above dialogue please')
     ]
 
-    filled = my_templates.fill(my_dialogue)
-
-
-
-class LlamaTokens(Tokens):
-
-    @template()
-    def system(self, prompt=Input(), date=Input()) -> T.Self:
-        return f"<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
-
-    @template()
-    def user(self, input=Input()) -> T.Self:
-        return f"<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
-
-
-
-class MyLlamaTokens(LlamaTokens):
-
-    def system(self, prompt=Input(max=128), date=Input()) -> T.Self:
-        return super().system(prompt, date)
-
-    @template()
-    def dst(cls, slot=Input(), description=Input(), examples=Input()) -> T.Self:
-        return cls.user(input=f"Define the slot {slot}: {description} ({examples})")
-
-
-my_prompt = MyLlamaTokens().system(
-    prompt="You are a helpful assistant.", date='Friday October 18, 2024'
-).user(
-    input="What is the weather like today?"
-).dst(
-    'weather', 'The current weather.', 'What is the weather like today?'
-)
-
-llama = ...
-
-llama.generate(my_prompt)
+    context_tokens = my_templates.fill(my_dialogue)
 
 
 if __name__ == '__main__':
