@@ -83,7 +83,7 @@ class TokenSequence:
 
     def __add__(self, other):
         copy = cp.copy(self)
-        copy.sequence = copy.sequence + other.sequence
+        copy.sequence = copy.sequence + other.token_ids
         return copy
 
     def __iter__(self):
@@ -336,7 +336,7 @@ class TokenTemplate:
     tokenizer = None
 
     def __init__(self,
-        *sequence: str | 'TokenTemplate' | 'TokenSlot' | T.Iterable[tuple[int, bool, bool]|'TokenSlot'],
+        *sequence: str | 'TemplateConfig' | 'TokenSlot' | T.Iterable[tuple[int, bool, bool]|'TokenSlot'],
         is_attended: bool = True,
         is_label: bool = False,
         max_length: int = None,
@@ -350,7 +350,7 @@ class TokenTemplate:
         self.sequence:list[tuple[int, bool, bool]|TokenSlot] = []
         self.slots:dict[str, TokenSlot] = {}
         self.tokenizer = type(self).tokenizer if tokenizer is None else tokenizer
-        assert self.tokenizer is not None, "A tokenizer must be provided to TokenTemplate."
+        assert self.tokenizer is not None, "A tokenizer must be provided to TemplateConfig."
         self.pad_to_same_length = pad_to_same_length
         self.pad_to_multiple_of = pad_to_multiple_of
         self.pad_side = pad_side
@@ -361,7 +361,7 @@ class TokenTemplate:
             self.extend(sequence, is_attended=is_attended, is_label=is_label)
 
     def extend(self,
-        sequence: str | 'TokenTemplate' | 'TokenSlot' | T.Iterable[tuple[int, bool, bool]|'TokenSlot'],
+        sequence: str | 'TemplateConfig' | 'TokenSlot' | T.Iterable[tuple[int, bool, bool]|'TokenSlot'],
         is_attended: bool = True,
         is_label: bool = False,
     ):
@@ -393,7 +393,7 @@ class TokenTemplate:
                 for j, slot in enumerate(sequence) if isinstance(slot, TokenSlot)})
         for slot_name, (slot, index) in added_slots.items():
             if slot_name in self.slots:
-                raise ValueError(f"Slot {slot_name} already exists in TokenTemplate.")
+                raise ValueError(f"Slot {slot_name} already exists in TemplateConfig.")
             if slot.index is None:
                 slot.index = index
             else:
@@ -415,7 +415,7 @@ class TokenTemplate:
         assert all(slot in self.slots for slot in slots), \
             f"Slots {set(slots) - set(self.slots)} not found in TokenSequence."
         filled = []
-        # get the prefix of this self template that contains slots about to be filled with given values
+        # get the prefix of this self template that contains __template_slots__ about to be filled with given values
         end_of_filled = None
         prompt_slots = set()
         for slot_name, slot in self.slots.items():
@@ -483,7 +483,7 @@ class TokenTemplate:
             else:  # nobreak
                 raise ValueError(
                     f"Could not truncate slot text to fit within max_length {self.max_length} (max truncation was reached after sequence was cut down to {current_length} tokens).")
-        # join together the final sequence
+        # join together the final token_ids
         previous_splitter = 0
         for slot_name, subseq in slot_subseqs.items():
             if slot_name in template_prompt_slots:
@@ -526,12 +526,12 @@ class TokenTemplate:
     def __str__(self):
         tokens = (str(t) if isinstance(t, TokenSlot) else self.tokenizer.decode(t[0]) for t in self)
         if len(self) > 10:
-            return f'<TokenTemplate len {len(self)}: {"|".join(it.islice(tokens, 10))}|...>' # noqa
+            return f'<TemplateConfig len {len(self)}: {"|".join(it.islice(tokens, 10))}|...>' # noqa
         else:
-            return f'<TokenTemplate len {len(self)}: {"|".join(tokens)}>' # noqa
+            return f'<TemplateConfig len {len(self)}: {"|".join(tokens)}>' # noqa
 
     def __repr__(self):
-        return f"TokenTemplate({repr(self.sequence)})"
+        return f"TemplateConfig({repr(self.sequence)})"
 
 
 class TokenTemplates:
@@ -777,7 +777,7 @@ class SystemTemplate(Template):
     prompt: Slot = InputSlot(); date: Slot = InputSlot()
 
 @dc.dataclass
-class UserTemplate:
+class UserTemplate(Template):
     template = "<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
     input: Slot = InputSlot()
 

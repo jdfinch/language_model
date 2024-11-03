@@ -37,17 +37,17 @@ import language_model.scheduler as scheduler
 class Sequence(ez.Config):
     tokenizer: str = None
     format: dict[str, str] = None
-    """The format to use for training and generation. Use TokIn and TokOut objects to specify slots for input and output sequences (or just specify slots like #[input=myinput, trunc_side=L, trunc_rank=1.0]# or #[output=myoutput, max=50, min=20]# and customize truncation for sequences exceeding the max_sequence_length. When training and generating, data is passed in to fill slots in this format template."""
+    """The format to use for training and generation. Use TokIn and TokOut objects to specify __template_slots__ for input and output sequences (or just specify __template_slots__ like #[input=myinput, trunc_side=L, trunc_rank=1.0]# or #[output=myoutput, max=50, min=20]# and customize truncation for sequences exceeding the max_sequence_length. When training and generating, data is passed in to fill __template_slots__ in this format template."""
     max_length: int = 1024
     """The maximum token length of sequences the model trains on or can be fed as input for generation."""
     trunc_segments_side: str = 'L'
     """When entire segments (e.g. dialogue turns) must be removed, this determines which side they are removed from. 'L' for left, 'R' for right. Note that segments corresponding to templates with trunc_segment=False will never be removed."""
     max_segments: int | None = None
-    """The maximum number of segments to keep in a sequence. If None, no segment pruning will be performed. The primary use case for setting max_segments is to trim extremely long sequences by a number-of-segments threshold BEFORE any tokenization is performed, which can improve preprocessing efficiency."""
+    """The maximum number of segments to keep in a token_ids. If None, no segment pruning will be performed. The primary use case for setting max_segments is to trim extremely long sequences by a number-of-segments threshold BEFORE any tokenization is performed, which can improve preprocessing efficiency."""
     pad_side: str = 'L'
     """The side to pad sequences on. 'L' for left, 'R' for right."""
     pad_to_multiple_of: int = 8
-    """Pads sequences so that total sequence lengths are a multiple of this value, which can improve performance on GPU."""
+    """Pads sequences so that total token_ids lengths are a multiple of this value, which can improve performance on GPU."""
     # tokenization_num_processes: int|float = 1
     # """The number of processes to use for tokenization. Inputting a float will use that fraction of the available CPUs. Strangely, setting this to 2.0 (double the CPUs) is sometimes fastest."""
     # tokenization_batches_per_chunk: int|None = None

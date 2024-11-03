@@ -40,7 +40,7 @@ class Tokenizer:
         self.tokenizer = get_tokenizer(tokenizer, local_files_only=local_files_only)
             
     def templatize(self, 
-        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'] | dict[str, str|TokenTemplate],
+        *sequence: str | 'TemplateConfig' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | 'TokSlot'] | dict[str, str|TokenTemplate],
         is_attended: bool = default,
         is_label: bool = default,
         max_length: int = None,
@@ -50,7 +50,7 @@ class Tokenizer:
         pad_side: str = 'L',
         trunc_segments_side: str = 'L',
         max_segments: int|None = None,
-    ) -> T.Union['TokenTemplate', 'TokenTemplateCollection']:
+    ) -> T.Union['TemplateConfig', 'TokenTemplateCollection']:
         if sequence and isinstance(sequence[0], dict):
             return TokenTemplateCollection(
                 {name: template for templates in sequence for name, template in templates.items()},
@@ -105,10 +105,10 @@ class _DisplaySettings:
     _display_slot_color = (80, 60, 30)
 
 def display_tokens(seq: TokenSequence | TokenTemplate):
-    num_slots = len(seq.slots) if hasattr(seq, 'slots') else 0
+    num_slots = len(seq.slots) if hasattr(seq, '__template_slots__') else 0
     num_tokens = len(seq) - num_slots
     if num_slots > 0:
-        header = f"{seq.__class__.__name__} with {num_tokens} tokens and {num_slots} slots:"
+        header = f"{seq.__class__.__name__} with {num_tokens} tokens and {num_slots} __template_slots__:"
     else:
         header = f"{seq.__class__.__name__} with {num_tokens} tokens:"
     display_tokens = []
@@ -271,7 +271,7 @@ class TokenTemplate(_DisplaySettings, list):
     _slot_pattern = re.compile(r"#\[(.*?)]#")
 
     def __init__(self,
-        *sequence: str | 'TokenTemplate' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | TokSlot],
+        *sequence: str | 'TemplateConfig' | 'TokSlot' | T.Iterable[tuple[int, bool, bool] | TokSlot],
         is_attended: bool = default,
         is_label: bool = default,
         max_length: int = None,
@@ -299,7 +299,7 @@ class TokenTemplate(_DisplaySettings, list):
         self.trunc_content = (
             trunc_content if not isinstance(trunc_content, str) else 'TRUE'.startswith(trunc_content.upper())) # noqa
         list.__init__(self)
-        """Tokens as (id, str, is_attended, is_label) tuples. InputSlot/OutputSequence objects represent slots to fill in the sequence with input/output text."""
+        """Tokens as (id, str, is_attended, is_label) tuples. InputSlot/OutputSequence objects represent __template_slots__ to fill in the token_ids with input/output text."""
         self.slots: dict[str, TokSlot] = {}
         for sequence in sequence:
             if isinstance(sequence, TokenTemplate):
@@ -371,7 +371,7 @@ class TokenTemplate(_DisplaySettings, list):
         trunc_segment: bool = default,
         trunc_content: bool = default,
         tokenizer: PreTrainedTokenizer = default,
-    ) -> 'TokenTemplate':
+    ) -> 'TemplateConfig':
         c = self.__class__(
             [],
             is_attended=self.is_attended if is_attended is default else is_attended,
@@ -459,7 +459,7 @@ class TokenTemplate(_DisplaySettings, list):
         for slot_name, text_seq in slots.items():
             if text_seq is None or text_seq is Ellipsis:
                 continue
-            assert slot_name in self.slots, f"Slot {slot_name} not found in TokenTemplate."
+            assert slot_name in self.slots, f"Slot {slot_name} not found in TemplateConfig."
             slot = self.slots[slot_name]
             text_seq = TokenSequence(text_seq, is_label=slot.is_label, tokenizer=self.tokenizer)
             if slot.eos_tokens is not None:
@@ -472,7 +472,7 @@ class TokenTemplate(_DisplaySettings, list):
                 eos = ()
             text_seq.extend(eos)
             slot_subseqs[slot_name] = text_seq
-        # get the prefix of this self template that contains slots about to be filled with given values
+        # get the prefix of this self template that contains __template_slots__ about to be filled with given values
         template_prefix_slots = {}
         for slot_name, slot in self.slots.items():
             if slot_name not in slot_subseqs:
@@ -513,8 +513,8 @@ class TokenTemplate(_DisplaySettings, list):
                     if current_length <= max_length:
                         break
             else: # nobreak
-                raise ValueError(f"Could not truncate slot text to fit within max_length {max_length} (max truncation was reached after sequence was cut down to {current_length} tokens).")
-        # join together the final sequence
+                raise ValueError(f"Could not truncate slot text to fit within max_length {max_length} (max truncation was reached after token_ids was cut down to {current_length} tokens).")
+        # join together the final token_ids
         previous_splitter = 0
         for slot_name, subseq in slot_subseqs.items():
             if slot_name in template_prefix_slots:
@@ -524,7 +524,7 @@ class TokenTemplate(_DisplaySettings, list):
                 filled.extend(subseq)
                 previous_splitter = splitter + 1
         filled.extend(template_prefix[previous_splitter:])
-        # pad the final sequence if needed
+        # pad the final token_ids if needed
         if min_length is not None and len(filled) < min_length:
             pad_length = min_length - len(filled)
             remainder = pad_length % pad_to_multiple_of
@@ -561,9 +561,9 @@ class TokenTemplate(_DisplaySettings, list):
 
     def __str__(self):
         if len(self) > 10:
-            return f'<TokenTemplate len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self[:10])}|...>'
+            return f'<TemplateConfig len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self[:10])}|...>'
         else:
-            return f'<TokenTemplate len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self)}>'
+            return f'<TemplateConfig len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) if isinstance(t, tuple) else t.as_text() for t in self)}>'
 
     def __repr__(self):
         return str(self)
