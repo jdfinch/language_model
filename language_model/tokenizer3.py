@@ -771,7 +771,7 @@ if __name__ == '__main__':
 
     @dc.dataclass
     class BotTemplate(Template):
-        template = "<|start_header_id|>bot<|end_header_id|>\n\n{output}<|eot_id|>"
+        template = "<|start_header_id|>assistant<|end_header_id|>\n\n{output}"
         output: Slot = OutputSlot()
 
     @dc.dataclass
@@ -794,10 +794,11 @@ if __name__ == '__main__':
         LlamaTemplates.user(input="What is the weather like today?"),
         LlamaTemplates.bot(output="The weather is sunny!"),
         LlamaTemplates.user("Great! What about tomorrow?"),
+        LlamaTemplates.bot(...)
     ]
 
     sequence = templates.fill(chat)
-    print(sequence.tokens())
+    print('|'.join(sequence.tokens()))
 
 
 
