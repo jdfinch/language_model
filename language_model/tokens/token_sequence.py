@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 import copy as cp
 import dataclasses as dc
 import ezpyzy.ansi as ansi

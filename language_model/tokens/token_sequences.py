@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 from language_model.tokens.token_sequence import TokenSequence
 from language_model.tokens.tokenizer import Tokenizer
 

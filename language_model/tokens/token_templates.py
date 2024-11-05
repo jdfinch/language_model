@@ -21,18 +21,22 @@ default: T.Any = object()
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
 
 
-
 class TokenTemplatesMeta(type):
     def __new__(typ, name, bases, attrs):
         cls = super().__new__(typ, name, bases, attrs)
+        if len(bases) > 0:
+            assert isinstance(getattr(cls, 'tokenizer', None), Tokenizer), \
+                f"TokenTemplates subclass {cls} must define a tokenizer attribute of type Tokenizer."
         for name, attr in attrs.items():
-            if isinstance(attr, type) and issubclass(attr, Template) and attr.template is None:
-                attr.template = attrs.get('template', None)
+            if isinstance(attr, type) and issubclass(attr, Template) and getattr(attr, 'tokenizer', None) is None:
+                attr.tokenizer = attrs.get('tokenizer', None)
         return cls
 
 @dc.dataclass
 class TokenTemplates(metaclass=TokenTemplatesMeta):
     tokenizer = None
+    sequence_prefix = ''
+    sequence_suffix = ''
     max_length: int = None
     pad_to_same_length: bool = True
     pad_to_multiple_of: int = 8
@@ -54,6 +58,10 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
                 elif template.tokenizer is None:
                     template.tokenizer = self.tokenizer
                 self.templates[field.default] = getattr(self, field.name)
+        if self.sequence_prefix:
+            self.sequence_prefix = TokenSequence(self.sequence_prefix, tokenizer=self.tokenizer)
+        if self.sequence_suffix:
+            self.sequence_suffix = TokenSequence(self.sequence_suffix, tokenizer=self.tokenizer)
 
     def fill(self, segments_values: list[Template]|T.Iterable[list[Template]]) -> TokenSequence|TokenSequences:
         if not isinstance(segments_values, list) or isinstance(segments_values[0], list):
@@ -213,7 +221,7 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
             slot_value_table[(i, j)] = (slot, seq, min_tokens, max_tokens + recover_amount)
 
         # create final token sequence
-        final_seq = TokenSequence(tokenizer=self.tokenizer)
+        final_seq = TokenSequence(self.sequence_prefix or '', tokenizer=self.tokenizer)
         for i, (template, seg_value_seqs) in segs_value_seqs.items():
             previous_slot_index = 0
             for j, value_seq in enumerate(seg_value_seqs):
@@ -230,14 +238,11 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
                 else:
                     final_seq += value_seq
             final_seq += template.tokens[previous_slot_index:]
+        if self.sequence_suffix:
+            final_seq += self.sequence_suffix
         return final_seq
 
-
-
-
 token_templates_base_fields = {field.name for field in fields(TokenTemplates)}
-
-
 
 
 if __name__ == '__main__':

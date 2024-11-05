@@ -1,353 +1,131 @@
 import dataclasses as dc
+
+from language_model.tokens import TokenSlot
 from language_model.utils.test import test
-from language_model.tokenizer import Tokenizer
+import language_model.tokens as lmt
 
 import textwrap as tw
 
 
+
 with test('Construct Tokenizers'):
-    ll3_tokenizer = Tokenizer('meta-llama/Meta-Llama-3.1-8B-Instruct')
-    ll2_tokenizer = Tokenizer('meta-llama/Llama-2-7b-chat-hf')
-
-with test('Construct Token Templates'):
-    ll3_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    You are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a]#
-    
-    ''').strip())
-
-    print(ll3_template.display())
-
-    ll2_template = ll2_tokenizer.templatize(tw.dedent('''
-    
-    [INST] <<SYS>> You are a helpful, respectful, and honest assistant. <</SYS>> #[input=q]# [/INST] #[output=a]#
-    
-    ''').strip())
-
-    print(ll2_template.display())
+    ll3_tokenizer = lmt.HuggingfaceTokenizer('meta-llama/Meta-Llama-3.1-8B-Instruct')
+    ll2_tokenizer = lmt.HuggingfaceTokenizer('meta-llama/Llama-2-7b-chat-hf')
 
 
-with test('Fill InputSlot Only'):
-    ll3_input = ll3_template.fill(q='What is the capital of France?')
-    print(ll3_input.display())
+with test('Construct Templates'):
 
-    ll2_input = ll2_template.fill(q='What is the capital of France?')
-    print(ll2_input.display())
+    @dc.dataclass
+    class Turn(lmt.Template):
+        template = "<|start_header_id|><role><|end_header_id|>\n\n<text><|eot_id|>"
+        role: lmt.Slot = lmt.Input()
+        text: lmt.Slot = lmt.Input()
 
-    assert 'What is the capital of France?' in ll3_input.text()
-    assert 'What is the capital of France?' in ll2_input.text()
-    assert ll3_input.tokens()[-1] != '<|eot_id|>'
+    @dc.dataclass
+    class Document(lmt.Template):
+        template = "\n\nConsider the following document:\n\n# <title>\n\n<document_text>"
+        title: lmt.Slot = lmt.Input()
+        document_text: lmt.Slot = lmt.Input()
 
-
-with test('Fill InputSlot and OutputSlot'):
-    ll3_input_output = ll3_template.fill(q='What is the capital of France?', a='Paris')
-    print(ll3_input_output.display())
-
-    ll2_input_output = ll2_template.fill(q='What is the capital of France?', a='Paris')
-    print(ll2_input_output.display())
-
-    assert 'What is the capital of France?' in ll3_input_output.text()
-    assert 'What is the capital of France?' in ll2_input_output.text()
-    assert 'Paris' in ll3_input_output.text()
-    assert 'Paris' in ll2_input_output.text()
-    assert ll3_input_output.tokens()[-1] == '<|eot_id|>'
-    assert ll2_input_output.tokens()[-1] == '</s>'
+    @dc.dataclass
+    class SystemRoleplayInstruction(lmt.Template):
+        template = Turn(text=f"You are a <profession>. Respond in a <style> manner.{Document.template}")
+        role: lmt.Slot = lmt.Input()
+        profession: lmt.Slot = lmt.Input()
+        style: lmt.Slot = lmt.Input()
+        title: lmt.Slot = lmt.Input()
+        document_text: lmt.Slot = lmt.Input()
 
 
-
-with test('Triple Slot Template'):
-    ts_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a, eos=]# ... no end in sight ...
-    
-    ''').strip())
-    print(ts_template.display())
-    ts_1 = ts_template.fill(sys='Please answer without hallucinating.')
-    print(ts_1.display())
-    ts_2 = ts_template.fill(sys='Please answer without hallucinating.', q='What is the capital of France?')
-    print(ts_2.display())
-    ts_3 = ts_template.fill(sys="Please answer without hallucinating", q='What is the capital of France?', a='Paris')
-    print(ts_3.display())
-    ts_4 = ts_template.fill(q='What is the capital of France?', a='Paris')
-    print(ts_4.display())
-
-
-with test('Truncation Specified No Effect'):
-    base_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a]#
-    
-    ''').strip())
-    short_template = base_template.copy(max_length=50)
-    print(short_template.display())
-    short_seq = short_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='The capital of France is Paris.')
-    print(short_seq.display())
-
-    text = short_seq.text()
-    assert 'Please answer without hallucinating' in text
-    assert 'What is the capital of France?' in text
-    assert 'The capital of France is Paris.' in text
-
-
-with test('Default Truncation'):
-    base_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a]#
-    
-    ''').strip())
-    short_template = base_template.copy(max_length=30)
-    print(short_template.display())
-    short_seq = short_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='The capital of France is Paris.')
-    print(short_seq.display())
-
-    text = short_seq.text()
-    assert 'Please answer without hallucinating' in text
-    assert 'What is the capital of France?' in text
-    assert 'The capital of France is Paris.' not in text
-    assert 'The capital of' in text
-
-
-with test('More Truncation'):
-    shorter_template = base_template.copy(max_length=25)
-    print(shorter_template.display())
-    shorter_seq = shorter_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='The capital of France is Paris.')
-    print(shorter_seq.display())
-
-    assert shorter_seq.tokens(strip=True)[5:8] == ['without', 'halluc', 'inating']
-    assert shorter_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
-    assert shorter_seq.tokens(strip=True)[-1] == '\n\n'
-
-
-with test('Right Truncate'):
-    rt_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a]#
-    
-    ''').strip(), max_length=25)
+    assert SystemRoleplayInstruction.template == tw.dedent('''
+        <|start_header_id|><role><|end_header_id|>
         
-    rt_seq = rt_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='The capital of France is Paris.')
-    print(rt_seq.display())
-
-    assert len(rt_seq) == 25
-    assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
-    assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
-    assert rt_seq.tokens()[-1] == '\n\n'
-
-
-with test('Right Truncate Into User'):
-    rt_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a]#
-    
-    ''').strip(), max_length=20)
+        You are a <profession>. Respond in a <style> manner.
         
-    rt_seq = rt_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='The capital of France is Paris.')
-    print(rt_seq.display())
-
-    assert len(rt_seq) == 20
-    assert rt_seq.tokens(strip=True)[10:15] == ['What', 'is', 'the', 'capital', 'of']
-    assert rt_seq.tokens()[-1] == '\n\n'
-
-
-with test('Exact Protect Slot From Truncation'):
-    rt_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a,min=1,trunc_side=R]#
-    
-    ''').strip(), max_length=24)
+        Consider the following document:
         
-    rt_seq = rt_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='Paris.')
-    print(rt_seq.display())
-
-    assert len(rt_seq) == 24
-    assert rt_seq.tokens(strip=True)[5:7] == ['Please', 'answer']
-    assert rt_seq.tokens(strip=True)[12:18] == ['What', 'is', 'the', 'capital', 'of', 'France']
-    assert rt_seq.tokens()[-1] == 'Paris'
-
-
-with test('Conservative Protect Slot From Truncation'):
-    rt_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a,min=1,trunc_side=R]#
-    
-    ''').strip(), max_length=26)
+        # <title>
         
-    rt_seq = rt_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='Paris.')
-    print(rt_seq.display())
-
-    assert len(rt_seq) == 26
-    assert rt_seq.tokens(strip=True)[5:8] == ['Please', 'answer', 'without']
-    assert rt_seq.tokens(strip=True)[13:20] == ['What', 'is', 'the', 'capital', 'of', 'France', '?']
-    assert rt_seq.tokens()[-1] == 'Paris'
+        <document_text><|eot_id|>''').strip()
+    assert {slot.name for slot in SystemRoleplayInstruction} == {
+        'role', 'profession', 'style', 'title', 'document_text'}
 
 
-with test('Incompatible Max Length and Slot Protection Length', raises=ValueError):
-    rt_template = ll3_tokenizer.templatize(tw.dedent('''
-    
-    <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+with test('Construct Llama3 Templates Group'):
 
-    #[input=sys,min=2,trunc_side=R]#<|eot_id|><|start_header_id|>user<|end_header_id|>
-    
-    #[input=q,min=6,trunc_side=R]#<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    
-    #[output=a,min=1,trunc_side=R]#
-    
-    ''').strip(), max_length=20)
-        
-    rt_seq = rt_template.fill(
-        sys="Please answer without hallucinating",
-        q='What is the capital of France?',
-        a='Paris.')
+    @dc.dataclass
+    class Llama3Templates(lmt.TokenTemplates):
+        tokenizer = ll3_tokenizer
+        sequence_prefix = '<|begin_of_text|>'
+        turn: lmt.TemplateConfig[Turn] = Turn
+        document: lmt.TemplateConfig[Document] = Document
+        system_roleplay_instruction: lmt.TemplateConfig[SystemRoleplayInstruction] = SystemRoleplayInstruction
 
 
-# todo - changing slot truncation priority
+with test('Configure Llama3 Templates Tokenization'):
+
+    tokenizer = Llama3Templates(
+        document=lmt.TemplateConfig(
+            template=Document(document_text=lmt.Input(min=8)),
+            trunc_segment_side='R'
+        ),
+        max_segments=10)
+
+    assert tokenizer.max_segments == 10
+    assert tokenizer.document.trunc_segment_side == 'R'
+    assert tokenizer.document.template.document_text.min == 8
+    assert tokenizer.tokenizer is ll3_tokenizer
+    assert tokenizer.document.tokenizer is ll3_tokenizer
 
 
-with test('Construct Template Collection'):
-    templates = ll3_tokenizer.templatize({
-        'system_prompt (trunc_content=False, trunc_segment=False)':
-            '<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n#[input=text]#<|eot_id|>',
-        'document (trunc_segment=False)':
-            '<|start_header_id|>user<|end_header_id|>\n\nPlease base your answers on the doc:\n\n#[input=text, min=8, trunc_side=R]#<|eot_id|>',
-        'user_instruction (trunc_content=False)':
-            '<|start_header_id|>user<|end_header_id|>\n\n#[input=text]#<|eot_id|>',
-        'assistant_response (trunc_content=False)':
-            '<|start_header_id|>assistant<|end_header_id|>\n\n#[output=text]#',
-        'assistant_prefix (trunc_content=False)':
-            '<|start_header_id|>assistant<|end_header_id|>\n\n#[input=text]#',
-        'assistant_continuation':
-            '#[output=text, min=3]#',
-    })
-
-    for name, template in templates.templates.items():
-        print(name, f'{template.trunc_segment=}', f'{template.trunc_content=}')
-        print(template.display())
-
-
-with test('Dialogue Sequence'):
+with test('Construct Llama3 Data'):
+    instruction = Llama3Templates.system_roleplay_instruction(
+        role="system", profession="primary care physician", style="natural",
+        title="Patient's Symptoms", document_text="A check-up requires taking the patient's temperature, blood pressure, pulse rate, and asking the patient if they have any symptoms.")
     dialogue = [
-        dict(temp='system_prompt', text='You are a helpful assistant.'),
-        dict(temp='document', text='France is a country in Europe. It has a long history.'),
-        dict(temp='user_instruction', text='Hi there, can you help me?'),
-        dict(temp='assistant_response', text='Of course! How can I help you today?'),
-        dict(temp='user_instruction', text='What is the capital of France?'),
-        dict(temp='assistant_response', text='The capital of France is Paris.'),
+        instruction,
+        Llama3Templates.turn(role="user", text="I'm feeling a bit under the weather today."),
+        Llama3Templates.turn(role="assistant", text="What seems to be the problem?"),
+        Llama3Templates.turn(role="user", text="I've had a headache and a runny nose all day.")
     ]
-    tokens = templates.fill(dialogue)
-    print(tokens.display())
-
-with test('Dialogue Sequence with Small Truncation'):
-    templates_with_truncation = dc.replace(templates, max_length=87)
-    tokens = templates_with_truncation.fill(dialogue)
-    print(tokens.display())
-
-with test('Dialogue Sequence with More Truncation'):
-    templates_with_truncation = dc.replace(templates, max_length=80)
-    tokens = templates_with_truncation.fill(dialogue)
-    print(tokens.display())
-
-with test('Dialogue Sequence with Large Truncation'):
-    templates_with_truncation = dc.replace(templates, max_length=60)
-    tokens = templates_with_truncation.fill(dialogue)
-    print(tokens.display())
-
-with test('Batch Dialogue Tokenization with Large Truncation'):
-    dialogue2 = [
-        dict(temp='system_prompt', text='You are helpful.'),
-        dict(temp='document', text='France is a country.'),
-        dict(temp='user_instruction', text='Can you help?'),
-        dict(temp='assistant_response', text='Of course!'),
-        dict(temp='user_instruction', text='What is the capital of France?'),
-        dict(temp='assistant_response', text='It is Paris!'),
-    ]
-    dialogue3 = [
-        dict(temp='system_prompt', text='You are a helpful assistant.'),
-        dict(temp='document', text='France is a country in Europe. It has a long history and people speak French there.'),
-        dict(temp='user_instruction', text='Hi there!'),
-        dict(temp='assistant_response', text='How can I help you today? I am a helpful assistant.'),
-        dict(temp='user_instruction', text='What is the capital of France?'),
-        dict(temp='assistant_response', text='The capital of France is Paris. Would you like to know more?'),
-    ]
-    dialogues = [dialogue, dialogue2, dialogue3]
-    temps = dc.replace(templates_with_truncation, max_length=90, pad_side='R')
-    tokens = temps.fill(dialogues)
-    print(tokens.display())
+    assert instruction.role == "system"
+    assert instruction.profession == "primary care physician"
+    assert instruction.style == "natural"
+    assert instruction.title == "Patient's Symptoms"
+    assert dialogue[-1].role == "user"
+    assert dialogue[-1].text == "I've had a headache and a runny nose all day."
+    assert str(instruction) == tw.dedent('''
+        <|start_header_id|>system<|end_header_id|>
+    
+        You are a primary care physician. Respond in a natural manner.
+        
+        Consider the following document:
+        
+        # Patient's Symptoms
+        
+        A check-up requires taking the patient's temperature, blood pressure, pulse rate, and asking the patient if they have any symptoms.<|eot_id|>
+    ''').strip()
 
 
-
-
-
-
-
+with test('Tokenize Llama3 Data'):
+    sequence = tokenizer.fill(dialogue)
+    assert '|'.join(sequence.tokens()) == tw.dedent('''
+        <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+    
+        |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+        
+        |Consider| the| following| document|:
+        
+        |#| Patient|'s| Symptoms|
+        
+        |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|,| and| asking| the| patient| if| they| have| any| symptoms|.|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+        
+        |I|'m| feeling| a| bit| under| the| weather| today|.|<|eot_id|>|<|start_header_id|>|assistant|<|end_header_id|>|
+        
+        |What| seems| to| be| the| problem|?|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+        
+        |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
 
 
 

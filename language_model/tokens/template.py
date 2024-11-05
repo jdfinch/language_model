@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 import dataclasses as dc
 import functools as ft
 import copy as cp
@@ -46,6 +48,22 @@ class InputSlot(TokenSlot):
     prefix: str|TokenSequence = ''
     suffix: str|TokenSequence = ''
 
+def Input(
+    name: str = 'input',
+    is_label: bool = False,
+    max: int = None,
+    min: int = 0,
+    truncatable: bool = True,
+    trunc_side: str = 'L',
+    trunc_rank: float = 1.0,
+    trunc_text: str|TokenSequence = '...',
+    min_out: int = 0,
+    prefix: str|TokenSequence = '',
+    suffix: str|TokenSequence = '',
+) -> str|InputSlot:
+    return InputSlot(
+        name, is_label, max, min, truncatable, trunc_side, trunc_rank, trunc_text, min_out, prefix, suffix)
+
 @dc.dataclass(frozen=True)
 class OutputSlot(TokenSlot):
     name: str = 'output'
@@ -60,6 +78,22 @@ class OutputSlot(TokenSlot):
     prefix: str|TokenSequence = ''
     suffix: str|TokenSequence = '{eos}'
 
+def Output(
+    name: str = 'output',
+    is_label: bool = True,
+    max: int = None,
+    min: int = 0,
+    truncatable: bool = True,
+    trunc_side: str = 'R',
+    trunc_rank: float = 1.0,
+    trunc_text: str|TokenSequence = '',
+    min_out: int = 0,
+    prefix: str|TokenSequence = '',
+    suffix: str|TokenSequence = '{eos}',
+) -> str|OutputSlot:
+    return OutputSlot(
+        name, is_label, max, min, truncatable, trunc_side, trunc_rank, trunc_text, min_out, prefix, suffix)
+
 
 class TemplateMeta(type):
     template: str = None
@@ -73,14 +107,18 @@ class TemplateMeta(type):
         if len(bases) > 1:
             assert isinstance(attrs.get('template'), str), \
                 f"Class {name} must define a class attribute 'template' with a template string."
+        cls.template = str(cls.template)
         for slot_name, value in attrs.items():
             if isinstance(value, TokenSlot):
-                assert '{'+slot_name+'}' in cls.template, \
+                assert '<'+slot_name+'>' in cls.template, \
                     f"Slot {slot_name} was defined as a class field of {name} but not in template text:  {cls.template}"
                 value = dc.replace(value, name=slot_name)
                 cls.__template_slots__[slot_name] = value
                 setattr(cls, slot_name, dc.field(default_factory=ft.partial(cp.copy, value)))
         return cls
+
+    def __iter__(self) -> T.Iterator[TokenSlot]:
+        return iter(self.__template_slots__.values())
 
 class Template(metaclass=TemplateMeta):
     template: str
@@ -89,8 +127,17 @@ class Template(metaclass=TemplateMeta):
     def __iter__(self):
         return iter(self.__template_slots__)
 
-    def __getitem__(self, item: str) -> str|TokenSlot:
+    def __getitem__(self, item):
         return getattr(self, item)
+
+    def __str__(self):
+        text = self.template
+        for slot_name, slot in self.__template_slots__.items():
+            value = getattr(self, slot_name)
+            if isinstance(value, TokenSlot):
+                value = f"<{value.name}>"
+            text = text.replace(f"<{slot_name}>", value)
+        return text
 
 
 TT = T.TypeVar('TT', bound=Template)
@@ -103,7 +150,7 @@ class TemplateConfig(T.Generic[TT]):
 
     @dataclass
     class MyTemplate(Template):
-        template = 'This is a {adjective} {noun}.'
+        template = 'This is a <adjective> <noun>.'
         adjective: Slot = InputSlot() 
         noun: Slot = InputSlot()
     """
@@ -121,12 +168,14 @@ class TemplateConfig(T.Generic[TT]):
     tokenizer: Tokenizer = None
 
     def __post_init__(self):
+        if self.tokenizer is None:
+            self.tokenizer = self.template.tokenizer
         if hasattr(self, '__template_slots__') and hasattr(self, 'tokens'): return
         self.slots: list[TokenSlot] = []
         template_text = self.template.template
         slot_pattern = re.compile(
             f"(?P<slot_lead>{self.tokenizer.slot_lead_pattern})" +
-            r"\{(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)}" +
+            r"<(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)>" +
             f"(?P<slot_trail>{self.tokenizer.slot_trail_pattern})"
         )
         previous_end = 0
@@ -145,8 +194,7 @@ class TemplateConfig(T.Generic[TT]):
                 previous_end = end
         template_suffix = template_text[previous_end:]
         self.tokens = TokenSequence(
-            '', is_attended=self.is_attended, is_label=self.is_label, tokenizer=self.tokenizer
-        )
+            '', is_attended=self.is_attended, is_label=self.is_label, tokenizer=self.tokenizer)
         for template_part, slot in zip(template_parts, slots):
             self.tokens += template_part
             slot_clone = dc.replace(slot, index=len(self.tokens))
@@ -161,9 +209,7 @@ class TemplateConfig(T.Generic[TT]):
             slot_clone = dc.replace(
                 slot_clone, trunc_text=TokenSequence(
                     slot_clone.trunc_text,
-                    is_attended=True, is_label=slot.is_label, tokenizer=self.tokenizer
-                )
-            )
+                    is_attended=True, is_label=slot.is_label, tokenizer=self.tokenizer))
             if isinstance(slot_clone.max, float):
                 assert slot_clone.max > slot_clone.min + len(slot_clone.trunc_text), \
                     f"Slot {slot_clone.name} has a max value length shorter than the sum of its min value length (plus length of truncation_text tokens such as '...')."
