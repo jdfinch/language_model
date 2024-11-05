@@ -9,6 +9,7 @@ import functools as ft
 import textwrap as tw
 import abc
 import copy as cp
+
 from language_model.utils.config import config, Config
 from language_model.utils.peek import peek
 from language_model.utils import ansi
@@ -351,7 +352,6 @@ TT = T.TypeVar('TT', bound=Template)
 
 @dc.dataclass
 class TemplateConfig(T.Generic[TT]):
-    tokenizer = None
     template: TT
     """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as fields for each slot in the template::
     
@@ -372,16 +372,16 @@ class TemplateConfig(T.Generic[TT]):
     pad_to_same_length: bool = True
     pad_to_multiple_of: int = 1
     pad_side: str = 'L'
+    tokenizer: Tokenizer = None
 
     def __post_init__(self):
-        self.tokenizer: Tokenizer
         if hasattr(self, '__template_slots__') and hasattr(self, 'tokens'): return
         self.slots: list[TokenSlot] = []
         template_text = self.template.template
         slot_pattern = re.compile(
-            f"(?TR<slot_lead>{self.tokenizer.slot_lead_pattern})" +
-            r"\{(?TR<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)}" +
-            f"(?TR<slot_trail>{self.tokenizer.slot_trail_pattern})")
+            f"(?P<slot_lead>{self.tokenizer.slot_lead_pattern})" +
+            r"\{(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)}" +
+            f"(?P<slot_trail>{self.tokenizer.slot_trail_pattern})")
         previous_end = 0
         template_parts = []
         slots = []
@@ -532,14 +532,22 @@ class MyTemplate(Template):
     noun: Slot = InputSlot()
     description: Slot = OutputSlot()
 
-template = Llama3TemplateConfig(MyTemplate())
-seq = template.fill(MyTemplate(
-    adjective='really big', noun='dog in the park', description='A big dog I saw in the park.'))
-print(seq.tokens())
+# template = Llama3TemplateConfig(MyTemplate())
+# seq = template.fill(MyTemplate(
+#     adjective='really big', noun='dog in the park', description='A big dog I saw in the park.'))
+# print(seq.tokens())
 
+
+class TokenTemplatesMeta(type):
+    def __new__(typ, name, bases, attrs):
+        cls = super().__new__(typ, name, bases, attrs)
+        for name, attr in attrs.items():
+            if isinstance(attr, type) and issubclass(attr, Template) and attr.template is None:
+                attr.template = attrs.get('template', None)
+        return cls
 
 @dc.dataclass
-class TokenTemplates:
+class TokenTemplates(metaclass=TokenTemplatesMeta):
     tokenizer = None
     max_length: int = None
     pad_to_same_length: bool = True
@@ -555,17 +563,12 @@ class TokenTemplates:
             raise ValueError(f"No templates are defined in the base TokenTemplates class. Initialize an instance of a TokenTemplates subclass with at least one TokenTemplate.")
         for field in fields(self):
             if field.name in template_fields:
-                annotation = field.type
-                assert getattr(annotation, '__origin__', None) == TemplateConfig, \
-                    f"Field {field.name} in {type(self).__qualname__} must be of type TokenTemplate."
-                assert (args:=getattr(annotation, '__args__', None)) and isinstance(args[0], Template), \
-                    f"Field {field.name} in {type(self).__qualname__} must be a TokenTemplate with a type argument that is an instance of a Template dataclass (defining a 'template' string with TokenSlot fields)."
-                assert field.default is args[0], \
-                    f"Field {field.name} in {type(self).__qualname__} must have a default value that is an instance of the TokenTemplate type argument, like `my_template: TokenTemplate[X] = X`"
-                if isinstance(template_cls:=getattr(self, field.name, None), type) is field.default:
-                    template = TemplateConfig(template_cls())
-                    template.tokenizer = self.tokenizer
+                template = getattr(self, field.name, None)
+                if isinstance(template, type) and issubclass(template, Template):
+                    template = TemplateConfig(template(), tokenizer=self.tokenizer)
                     setattr(self, field.name, template)
+                elif template.tokenizer is None:
+                    template.tokenizer = self.tokenizer
                 self.templates[field.default] = getattr(self, field.name)
 
     def fill(self, segments_values: list[Template]|T.Iterable[list[Template]]) -> TokenSequence|TokenSequences:
@@ -587,7 +590,7 @@ class TokenTemplates:
         slot_for_generation = None
         index_of_slot_for_generation = None
         index_of_segment_for_generation = None
-        num_expected_out_tokens = None
+        num_expected_out_tokens = 0
         for i, (segment_values, template) in enumerate(zip(segments_values, templates)):
             for j, slot in enumerate(template.slots):
                 value = getattr(segment_values, slot.name)
@@ -625,7 +628,7 @@ class TokenTemplates:
         _seg_trunc_cands_template, _seg_trunc_cands_values = 0, 1
 
         # truncate segments based on max sequences
-        if len(segments_table) > self.max_segments:
+        if self.max_segments and len(segments_table) > self.max_segments:
             for i in it.islice(seg_trunc_cands, len(segments_table) - self.max_segments):
                 del segments_table[i]
                 del seg_trunc_cands[i]
@@ -676,7 +679,7 @@ class TokenTemplates:
         iter_slot_trunc_cands = iter(list(slot_trunc_cands.items()))
         next_seg_to_trunc = next(iter_seg_trunc_cands, None)
         next_slot_to_trunc = next(iter_slot_trunc_cands, None)
-        while current_len > self.max_length:
+        while self.max_length and current_len > self.max_length:
             amount_to_trunc = current_len - self.max_length
             do_trunc_slot = False
             do_trunc_seg = False
@@ -727,7 +730,7 @@ class TokenTemplates:
 
         # create final token sequence
         final_seq = TokenSequence(tokenizer=self.tokenizer)
-        for i, (template, seg_value_seqs) in segments_table.items():
+        for i, (template, seg_value_seqs) in segs_value_seqs.items():
             previous_slot_index = 0
             for j, value_seq in enumerate(seg_value_seqs):
                 slot, _, min_tokens, max_tokens = slot_value_table[(i, j)]
@@ -751,48 +754,50 @@ class TokenTemplates:
 token_templates_base_fields = {field.name for field in fields(TokenTemplates)}
 
 
-@dc.dataclass
-class TokenPrinter:
-    tokens: T.Iterable = None
-    token_colors:tuple = ((55, 45, 120), (30, 70, 130), (20, 90, 110))
-    foreground_color: tuple = (200, 200, 200)
-    padding_color:tuple = ('black',)
-    label_color:tuple = (255, 255, 255)
-    label_style: str|None = ansi.bold
-    slot_color:tuple = (80, 60, 30)
 
-    def __post_init__(self):
-        if self.tokens is not None:
-            self.print(self.tokens)
 
-    def ansi(self, tokens: TokenSequence|TokenSequences):
-        if isinstance(tokens, TokenSequences):
-            return '\n\n'.join(self.ansi(seq) for seq in tokens)
-        display = []
-        token_color_iter =iter(it.cycle(self.token_colors))
-        token_texts = tokens.tokens()
-        token_types = [type(token) for token in tokens]
-        for token, token_text, token_type in zip(tokens, token_texts, token_types):
-            styles = []
-            if token_type is tuple:
-                token_id, is_attended, is_label = token
-                token_color = ansi.color(*next(token_color_iter)).bg
-                if not is_attended:
-                    padding_color = ansi.color(*self.padding_color).fg
-                    styles.append(padding_color)
-            elif issubclass(token_type, TokenSlot):
-                is_label = token.is_label
-                token_color = ansi.color(*self.slot_color).bg
-            else:
-                raise ValueError(f"Token type {token_type} for displaying token {token} is not recognized.")
-            styles.append(token_color)
-            if is_label:
-                styles.extend((ansi.color(*self.label_color).fg, self.label_style))
-            ansi_style = ''.join(styles)
-            token_display = f'{ansi_style}{token_text}{ansi.reset}'.replace(
-                '\n', f'↵{ansi.reset}\n{ansi_style}')
-            display.append(token_display)
-        return ''.join(display)
+if __name__ == '__main__':
 
-    def print(self, tokens):
-        print(self.ansi(tokens))
+    @dc.dataclass
+    class SystemTemplate(Template):
+        template = "<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
+        prompt: Slot = InputSlot()
+        date: Slot = InputSlot()
+
+    @dc.dataclass
+    class UserTemplate(Template):
+        template = "<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
+        input: Slot = InputSlot()
+
+    @dc.dataclass
+    class BotTemplate(Template):
+        template = "<|start_header_id|>bot<|end_header_id|>\n\n{output}<|eot_id|>"
+        output: Slot = OutputSlot()
+
+    @dc.dataclass
+    class LlamaTemplates(TokenTemplates):
+        tokenizer = Llama3Tokenizer()
+        system: TemplateConfig[SystemTemplate] = SystemTemplate
+        user: TemplateConfig[UserTemplate] = UserTemplate
+        bot: TemplateConfig[BotTemplate] = BotTemplate
+
+
+    ##############
+
+
+    templates = LlamaTemplates(
+
+    )
+
+    chat = [
+        LlamaTemplates.system(prompt="You are a helpful assistant.", date="2022-01-01"),
+        LlamaTemplates.user(input="What is the weather like today?"),
+        LlamaTemplates.bot(output="The weather is sunny!"),
+        LlamaTemplates.user("Great! What about tomorrow?"),
+    ]
+
+    sequence = templates.fill(chat)
+    print(sequence.tokens())
+
+
+
