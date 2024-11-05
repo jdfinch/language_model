@@ -6,6 +6,9 @@ import functools as ft
 import copy as cp
 import re
 
+import ezpyzy as ez
+from dataclasses import dataclass; vars().update(dataclass=ez.config) # noqa, black magic type hinting
+
 from language_model.tokens.token_sequence import TokenSequence
 from language_model.tokens.token_sequences import TokenSequences
 from language_model.tokens.tokenizer import Tokenizer
@@ -16,8 +19,8 @@ import typing as T
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
 
 
-@dc.dataclass(frozen=True)
-class TokenSlot:
+@dataclass
+class TokenSlot(ez.Config):
     name: str = 'text'
     is_label: bool = False
     max: int = None
@@ -34,7 +37,7 @@ class TokenSlot:
 
 Slot = str | TokenSlot
 
-@dc.dataclass(frozen=True)
+@dataclass
 class InputSlot(TokenSlot):
     name: str = 'input'
     is_label: bool = False
@@ -61,10 +64,10 @@ def Input(
     prefix: str|TokenSequence = '',
     suffix: str|TokenSequence = '',
 ) -> str|InputSlot:
-    return InputSlot(
-        name, is_label, max, min, truncatable, trunc_side, trunc_rank, trunc_text, min_out, prefix, suffix)
+    return ...
+vars().update(Input=InputSlot)
 
-@dc.dataclass(frozen=True)
+@dataclass
 class OutputSlot(TokenSlot):
     name: str = 'output'
     is_label: bool = True
@@ -91,8 +94,8 @@ def Output(
     prefix: str|TokenSequence = '',
     suffix: str|TokenSequence = '{eos}',
 ) -> str|OutputSlot:
-    return OutputSlot(
-        name, is_label, max, min, truncatable, trunc_side, trunc_rank, trunc_text, min_out, prefix, suffix)
+    return ...
+vars().update(Output=OutputSlot)
 
 
 class TemplateMeta(type):
@@ -112,7 +115,7 @@ class TemplateMeta(type):
             if isinstance(value, TokenSlot):
                 assert '<'+slot_name+'>' in cls.template, \
                     f"Slot {slot_name} was defined as a class field of {name} but not in template text:  {cls.template}"
-                value = dc.replace(value, name=slot_name)
+                value = TokenSlot(value, name=slot_name)
                 cls.__template_slots__[slot_name] = value
                 setattr(cls, slot_name, dc.field(default_factory=ft.partial(cp.copy, value)))
         return cls
@@ -143,9 +146,9 @@ class Template(metaclass=TemplateMeta):
 TT = T.TypeVar('TT', bound=Template)
 
 
-@dc.dataclass
-class TemplateConfig(T.Generic[TT]):
-    template: TT
+@dataclass
+class TemplateConfig(ez.Config, T.Generic[TT]):
+    template: TT = None
     """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as fields for each slot in the template::
 
     @dataclass
@@ -158,6 +161,7 @@ class TemplateConfig(T.Generic[TT]):
     is_label: bool = False
     trunc_content: bool = True
     trunc_segment: bool = False
+    trunc_segment_with_no_content: bool = True
     trunc_segment_rank: float = 1.0
     trunc_segment_side: str = 'L'
     max_length: int = None
@@ -168,8 +172,10 @@ class TemplateConfig(T.Generic[TT]):
     tokenizer: Tokenizer = None
 
     def __post_init__(self):
+        assert isinstance(self.template, Template), \
+            f"TemplateConfig must be initialized with a Template object, but got {self.template}."
         if self.tokenizer is None:
-            self.tokenizer = self.template.tokenizer
+            self.tokenizer = self.template.tokenizer # noqa
         if hasattr(self, '__template_slots__') and hasattr(self, 'tokens'): return
         self.slots: list[TokenSlot] = []
         template_text = self.template.template
@@ -187,33 +193,35 @@ class TemplateConfig(T.Generic[TT]):
             slot_trail = slot_match.group('slot_trail')
             if slot_name in self.template.__template_slots__:
                 slot = self.template.__template_slots__[slot_name]
+                slot_config = getattr(self.template, slot_name)
+                assert isinstance(slot_config, TokenSlot), \
+                    f"Slot {slot_name} in template {self.template.__class__.__name__} must be a TokenSlot object when configuring a template with TemplateConfig, but got {slot_config}."
+                slot = slot | slot_config
                 start, end = slot_match.span()
                 template_parts.append(template_text[previous_end:start])
-                slot_clone = dc.replace(slot, prefix=slot_lead + slot.prefix, suffix=slot.suffix + slot_trail)
-                slots.append(slot_clone)
+                slot |= TokenSlot(prefix=slot_lead + slot.prefix, suffix=slot.suffix + slot_trail)
+                slots.append(slot)
                 previous_end = end
         template_suffix = template_text[previous_end:]
         self.tokens = TokenSequence(
             '', is_attended=self.is_attended, is_label=self.is_label, tokenizer=self.tokenizer)
         for template_part, slot in zip(template_parts, slots):
             self.tokens += template_part
-            slot_clone = dc.replace(slot, index=len(self.tokens))
+            slot.index = len(self.tokens)
             for name, value in self.tokenizer.slot_affix_replacements.items():
                 if value is None: continue
-                if isinstance(slot_clone.prefix, str):
-                    slot_clone = dc.replace(slot_clone, prefix=slot_clone.prefix.replace(name, value))
-                if isinstance(slot_clone.suffix, str):
-                    slot_clone = dc.replace(slot_clone, suffix=slot_clone.suffix.replace(name, value))
-                if isinstance(slot_clone.trunc_text, str):
-                    slot_clone = dc.replace(slot_clone, trunc_text=slot_clone.trunc_text.replace(name, value))
-            slot_clone = dc.replace(
-                slot_clone, trunc_text=TokenSequence(
-                    slot_clone.trunc_text,
-                    is_attended=True, is_label=slot.is_label, tokenizer=self.tokenizer))
-            if isinstance(slot_clone.max, float):
-                assert slot_clone.max > slot_clone.min + len(slot_clone.trunc_text), \
-                    f"Slot {slot_clone.name} has a max value length shorter than the sum of its min value length (plus length of truncation_text tokens such as '...')."
-            self.slots.append(slot_clone)
+                if isinstance(slot.prefix, str):
+                    slot.prefix = slot.prefix.replace(name, value)
+                if isinstance(slot.suffix, str):
+                    slot.suffix = slot.suffix.replace(name, value)
+                if isinstance(slot.trunc_text, str):
+                    slot.trunc_text = slot.trunc_text.replace(name, value)
+            slot.trunc_text = TokenSequence(
+                    slot.trunc_text, is_attended=True, is_label=slot.is_label, tokenizer=self.tokenizer)
+            if isinstance(slot.max, float):
+                assert slot.max > slot.min + len(slot.trunc_text), \
+                    f"Slot {slot.name} has a max value length shorter than the sum of its min value length (plus length of truncation_text tokens such as '...')."
+            self.slots.append(slot)
         self.tokens += template_suffix
 
     def __call__(self, *args, **kwargs) -> TT:

@@ -208,7 +208,7 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
                 i, (template, seg_value_seqs) = next_seg_to_trunc
                 current_len -= len(template.tokens)
                 for j in range(len(template.slots)):
-                    del slot_trunc_cands[(i, j)]
+                    slot_trunc_cands.pop((i, j), None)
                     current_len -= slot_value_table[(i, j)][_slot_value_table_max]
                 del segments_table[i]
                 next_seg_to_trunc = next(iter_seg_trunc_cands, None)
@@ -246,65 +246,7 @@ token_templates_base_fields = {field.name for field in fields(TokenTemplates)}
 
 
 if __name__ == '__main__':
-
-
-    class Llama3Tokenizer(Tokenizer):
-        def __init__(self):
-            self.tokenizer = hf.AutoTokenizer.from_pretrained('meta-llama/Llama-3.2-3B-Instruct')
-            self.pad_token = '-'
-            self.pad_token_id, = self.tokenizer.encode(self.pad_token, add_special_tokens=False)
-
-        def encode(self, text: str) -> list[int]:
-            return self.tokenizer.encode(text, add_special_tokens=False)
-
-        def decode(self, token_ids: list[int]) -> str:
-            return self.tokenizer.decode(token_ids, skip_special_tokens=False)
-
-        slot_lead_pattern = r" ?"
-        slot_trail_pattern = ""
-        slot_affix_replacements = {'{eos}': '<|eot_id|>', '{bos}': '<|begin_of_text|>'}
-
-    @dc.dataclass
-    class SystemTemplate(Template):
-        template = "<|start_header_id|>system<|end_header_id|>\n\n{prompt}\n\n{date}<|eot_id|>"
-        prompt: Slot = InputSlot()
-        date: Slot = InputSlot()
-
-    @dc.dataclass
-    class UserTemplate(Template):
-        template = "<|start_header_id|>user<|end_header_id|>\n\n{input}<|eot_id|>"
-        input: Slot = InputSlot()
-
-    @dc.dataclass
-    class BotTemplate(Template):
-        template = "<|start_header_id|>assistant<|end_header_id|>\n\n{output}"
-        output: Slot = OutputSlot()
-
-    @dc.dataclass
-    class LlamaTemplates(TokenTemplates):
-        tokenizer = Llama3Tokenizer()
-        system: TemplateConfig[SystemTemplate] = SystemTemplate
-        user: TemplateConfig[UserTemplate] = UserTemplate
-        bot: TemplateConfig[BotTemplate] = BotTemplate
-
-
-    ##############
-
-
-    templates = LlamaTemplates(
-
-    )
-
-    chat = [
-        LlamaTemplates.system(prompt="You are a helpful assistant.", date="2022-01-01"),
-        LlamaTemplates.user(input="What is the weather like today?"),
-        LlamaTemplates.bot(output="The weather is sunny!"),
-        LlamaTemplates.user("Great! What about tomorrow?"),
-        LlamaTemplates.bot(...)
-    ]
-
-    sequence = templates.fill(chat)
-    print('|'.join(sequence.tokens()))
+    pass
 
 
 

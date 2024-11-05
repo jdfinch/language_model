@@ -13,7 +13,7 @@ with test('Construct Tokenizers'):
     ll2_tokenizer = lmt.HuggingfaceTokenizer('meta-llama/Llama-2-7b-chat-hf')
 
 
-with test('Construct Templates'):
+with test('Construct Templates', crash=True):
 
     @dc.dataclass
     class Turn(lmt.Template):
@@ -63,17 +63,26 @@ with test('Construct Llama3 Templates Group'):
 
 
 with test('Configure Llama3 Templates Tokenization'):
-
     tokenizer = Llama3Templates(
         document=lmt.TemplateConfig(
-            template=Document(document_text=lmt.Input(min=8)),
-            trunc_segment_side='R'
+            template=Document(
+                title=lmt.Input(truncatable=False),
+                document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
+            ),
+            trunc_segment_rank=1,
         ),
-        max_segments=10)
+        turn=lmt.TemplateConfig(
+            template=Turn(),
+            trunc_content=False,
+            trunc_segment=True,
+            trunc_segment_rank=2,
+            trunc_segment_side='L',
+        ),
+        max_segments=35,
+    )
 
-    assert tokenizer.max_segments == 10
-    assert tokenizer.document.trunc_segment_side == 'R'
-    assert tokenizer.document.template.document_text.min == 8
+    assert tokenizer.max_segments == 35
+    assert tokenizer.document.template.title.truncatable is False
     assert tokenizer.tokenizer is ll3_tokenizer
     assert tokenizer.document.tokenizer is ll3_tokenizer
 
@@ -126,6 +135,35 @@ with test('Tokenize Llama3 Data'):
         
         |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
     ''').strip()
+
+
+with test('Tokenize with Truncation', crash=True):
+    tokenizer = Llama3Templates(
+        document=lmt.TemplateConfig(
+            template=SystemRoleplayInstruction(
+                title=lmt.Input(truncatable=False),
+                document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
+            ),
+            trunc_segment_rank=1,
+        ),
+        turn=lmt.TemplateConfig(
+            template=Turn(),
+            trunc_content=False,
+            trunc_segment=True,
+            trunc_segment_rank=2,
+            trunc_segment_side='L',
+        ),
+        max_length=32,
+    )
+
+    assert tokenizer.system_roleplay_instruction.template.title.truncatable is False
+
+    sequence = tokenizer.fill(dialogue)
+    print('|'.join(sequence.tokens()))
+
+
+
+
 
 
 
