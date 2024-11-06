@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses as dc
 import itertools as it
 import copy as cp
+import re
 
 import ezpyzy as ez
 
@@ -53,15 +54,58 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
             if field.name in template_fields:
                 template = getattr(self, field.name, None)
                 if isinstance(template, type) and issubclass(template, Template):
-                    template = TemplateConfig(template(), tokenizer=self.tokenizer)
+                    template = TemplateConfig(template=template())
                     setattr(self, field.name, template)
-                elif template.tokenizer is None:
-                    template.tokenizer = self.tokenizer
                 self.templates[field.default] = getattr(self, field.name)
         if self.sequence_prefix:
             self.sequence_prefix = TokenSequence(self.sequence_prefix, tokenizer=self.tokenizer)
         if self.sequence_suffix:
             self.sequence_suffix = TokenSequence(self.sequence_suffix, tokenizer=self.tokenizer)
+        for template_type, template in self.templates.items():
+            template = TemplateConfig(template)
+            template_text = template.template.template
+            slot_pattern = re.compile(
+                f"(?P<slot_lead>{self.tokenizer.slot_lead_pattern})" +
+                r"<(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)>" +
+                f"(?P<slot_trail>{self.tokenizer.slot_trail_pattern})")
+            previous_end = 0
+            template_parts = []
+            slots = []
+            for slot_match in slot_pattern.finditer(template_text):
+                slot_name = slot_match.group('slot_name')
+                slot_lead = slot_match.group('slot_lead')
+                slot_trail = slot_match.group('slot_trail')
+                if slot_name in template.template.__template_slots__:
+                    slot = template.template.__template_slots__[slot_name]
+                    slot_config = getattr(template.template, slot_name)
+                    slot = slot | slot_config
+                    start, end = slot_match.span()
+                    template_parts.append(template_text[previous_end:start])
+                    slot |= TokenSlot(prefix=slot_lead + slot.prefix, suffix=slot.suffix + slot_trail)
+                    slots.append(slot)
+                    previous_end = end
+                template_suffix = template_text[previous_end:]
+                template.tokens = TokenSequence(
+                    '', is_attended=template.is_attended, is_label=template.is_label, tokenizer=self.tokenizer)
+                for template_part, slot in zip(template_parts, slots):
+                    template.tokens += template_part
+                    slot.index = len(template.tokens)
+                    for name, value in self.tokenizer.slot_affix_replacements.items():
+                        if value is None: continue
+                        if isinstance(slot.prefix, str):
+                            slot.prefix = slot.prefix.replace(name, value)
+                        if isinstance(slot.suffix, str):
+                            slot.suffix = slot.suffix.replace(name, value)
+                        if isinstance(slot.trunc_text, str):
+                            slot.trunc_text = slot.trunc_text.replace(name, value)
+                    slot.trunc_text = TokenSequence(slot.trunc_text,
+                        is_attended=template.is_attended, is_label=slot.is_label, tokenizer=self.tokenizer)
+                    if isinstance(slot.max, float):
+                        assert slot.max > slot.min + len(slot.trunc_text), \
+                            f"Slot {slot.name} has a max value length shorter than the sum of its min value length (plus length of truncation_text tokens such as '...')."
+                    template.slots.append(slot)
+                template.tokens += template_suffix
+                self.templates[template_type] = template
 
     def fill(self, segments_values: list[Template]|T.Iterable[list[Template]]) -> TokenSequence|TokenSequences:
         if not isinstance(segments_values, list) or isinstance(segments_values[0], list):

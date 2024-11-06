@@ -1,6 +1,6 @@
 import dataclasses as dc
 
-from language_model.tokens import TokenSlot
+from language_model.tokens import TokenSlot, Input
 from language_model.utils.test import test
 import language_model.tokens as lmt
 
@@ -19,7 +19,7 @@ with test('Construct Templates', crash=True):
     class Turn(lmt.Template):
         template = "<|start_header_id|><role><|end_header_id|>\n\n<text><|eot_id|>"
         role: lmt.Slot = lmt.Input()
-        text: lmt.Slot = lmt.Input()
+        text: lmt.Slot = lmt.Input(min=5)
 
     @dc.dataclass
     class Document(lmt.Template):
@@ -72,7 +72,7 @@ with test('Configure Llama3 Templates Tokenization'):
             trunc_segment_rank=1,
         ),
         turn=lmt.TemplateConfig(
-            template=Turn(),
+            template=Turn(text=Input(max=20)),
             trunc_content=False,
             trunc_segment=True,
             trunc_segment_rank=2,
