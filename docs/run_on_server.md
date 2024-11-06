@@ -59,23 +59,39 @@ There's a lot of steps here which can be overwhelming, but remember you can just
 12. **Verify Requirements Installed:**
     - Add `import torch` to your script and verify that the remote interpreter can import it successfully. Try `from langauage_model.t5 import T5` to verify importing the language_model package as well.
 
-13. **Create Shell Script:**
+13. **Configure running model for development:**
+    - Set up your run configuration to include the following environment variables:
+      ```bash
+      export PATHPREFIX="/local/scratch"
+      export HF_HOME="$PATHPREFIX/$USER/.cache/"
+      export TRANSFORMERS_CACHE="$HF_HOME/huggingface/transformers/"
+      export XDG_CACHE_HOME="$HF_HOME"
+      export CUDA_VISIBLE_DEVICES=7
+      ``` 
+    - For example, in PyCharm, you should have HF_HOME=/local/scratch/yourusername/.cache in your run configuration, accessed via the "Run -> Edit Configurations" menu.
+
+14. **Check GPU Availability and Run!**
+    - Run `nvidia-smi` to check the GPU availability and usage. If you're using SLURM, you can skip this step.
+    - Set CUDA_VISIBLE_DEVICES to the index of the GPU you want to use: do NOT use a GPU already in use (unless both processes have light utilization), as you are likely to crash the other user's experiment (and yours!).
+    - Take the LAST available GPU (e.g. 7 first, then 6, then 5) to minimize conflicts with SLURM jobs.
+
+15. **SLURM Usage: Create Shell Script to launch SLURM job:**
     - Create a shell script (e.g., `run.sh`) in your project directory. This script sets necessary environment variables and runs your Python script. Please refer to `docs/run.sh` for an example.
 
-14. **Test Shell Script:**
+16. **Test Shell Script:**
     - SSH into the server, make the shell script executable, and run it:
       ```bash
       chmod +x run.sh
       ./run.sh
       ```
 
-15. **Run Script Using SLURM:**
+17. **Run Script Using SLURM:**
     - Run your script using SLURM for GPU jobs:
       ```bash
       sbatch run.sh
       ```
 
-16. **View Job Output:**
+18. **View Job Output:**
     - View the output of the job using:
       ```bash
       cat job.out
@@ -85,7 +101,7 @@ There's a lot of steps here which can be overwhelming, but remember you can just
       tail -f job.out
       ```
 
-17. **Coding and Running:**
+19. **Coding and Running:**
     - You're now set up to code as usual in your script. Any changes you save will automatically upload to the server. Run your script using `sbatch` on your shell script through SSH.
 
 Congratulations! You've successfully set up a remote development environment for your project, enabling you to code, deploy, and run scripts seamlessly on a remote server.
