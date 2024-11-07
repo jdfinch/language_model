@@ -36,7 +36,7 @@ def load_merge_and_save_lora(lora_path: ez.filelike, merged_path: ez.filelike=No
     lora_path = ez.File(lora_path).path
     print(lora_path)
     name = lora_path.name
-    adapter_config = ez.File(lora_path / 'adapter_config.json').load()
+    adapter_config = ez.File(lora_path / 'adapter_config.json_e').load()
     base_model_name = adapter_config['base_model_name_or_path']
     base_model = T5ForConditionalGeneration.from_pretrained(
         base_model_name, torch_dtype=torch.float16, device_map='auto'
@@ -100,8 +100,8 @@ class T5Hyperparameters(ez.Settings):
 class T5(T5Hyperparameters):
     def __post_init__(self):
         T5Hyperparameters.__post_init__(self)
-        if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json').exists():
-            loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json').load()
+        if pl.Path(self.base).exists() and (pl.Path(self.base)/'hyperparameters.json_e').exists():
+            loaded_hyperparams:dict = ez.File(pl.Path(self.base)/'hyperparameters.json_e').load()
             specified_hyperparameters = vars(self).pop('settings')
             hyperparameters = {**loaded_hyperparams, **specified_hyperparameters}
             vars(self).update(hyperparameters)
@@ -143,7 +143,7 @@ class T5(T5Hyperparameters):
 
         load_path = pl.Path(self.base)
         delete_merge_path = None
-        if load_path.exists() and (load_path / 'adapter_config.json').exists() and self.lora_merge_on_load:
+        if load_path.exists() and (load_path / 'adapter_config.json_e').exists() and self.lora_merge_on_load:
             merged_path = load_path.parent / f"{load_path.name}.MERGED"
             delete_after = not merged_path.exists()
             ez.subproc(load_merge_and_save_lora, load_path)
@@ -177,7 +177,7 @@ class T5(T5Hyperparameters):
         path = ez.File(path).path
         self.model.save_pretrained(path)
         hyperparameters = {k:v for k,v in self.hyperparameters.items() if k != 'settings'}
-        ez.File(path/'hyperparameters.json').save(hyperparameters)
+        ez.File(path/'hyperparameters.json_e').save(hyperparameters)
         return path
 
     def save_checkpoint(self, path: ez.filelike = None):

@@ -149,7 +149,7 @@ TT = T.TypeVar('TT', bound=Template)
 @dataclass
 class TemplateConfig(ez.Config, T.Generic[TT]):
     template: TT = None
-    """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as fields for each slot in the template::
+    """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as and_unconfigured for each slot in the template::
 
     @dataclass
     class MyTemplate(Template):
