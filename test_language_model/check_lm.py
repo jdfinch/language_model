@@ -12,8 +12,8 @@ alpha = lambda s: ''.join(c for c in s if c.isalpha() or c == ' ')
 
 root = pl.Path(test_language_model.__file__).parent
 
-data_item_colors = ez.File(root / 'item_colors.json_e').load()
-data_capital_langs = ez.File(root / 'capital_langs.json_e').load()
+data_item_colors = ez.File(root / 'item_colors.json').load()
+data_capital_langs = ez.File(root / 'capital_langs.json').load()
 
 def eval(model, tests, assertion=True):
     total_correct = 0

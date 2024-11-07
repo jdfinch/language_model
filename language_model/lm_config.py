@@ -143,8 +143,8 @@ class LMConfig(ez.ImmutableConfig):
             if config_path.is_dir() and config_path.exists():
                 if self.model_to_load is None:
                     self.args.model_to_load = str(config_path)
-                if not (config_path / 'config.json_e').exists() and (config_path.parent / 'config.json_e').exists():
-                    self.args.base = config_path.parent / 'config.json_e'
+                if not (config_path / 'config.json').exists() and (config_path.parent / 'config.json').exists():
+                    self.args.base = config_path.parent / 'config.json'
         # Load the config
         ez.Config.__post_init__(self)
         if self.model_to_load is None:
@@ -153,16 +153,16 @@ class LMConfig(ez.ImmutableConfig):
             self.sequence_params.tokenizer = self.model_base
         # validate that any loaded adapter or model has the right base model specified
         model_to_load_path = pl.Path(self.model_to_load).expanduser()
-        if (model_to_load_path / 'adapter_config.json_e').exists():
-            hf_adapter_config = json.loads((model_to_load_path / 'adapter_config.json_e').read_text())
+        if (model_to_load_path / 'adapter_config.json').exists():
+            hf_adapter_config = json.loads((model_to_load_path / 'adapter_config.json').read_text())
             if 'base_model_name_or_path' in hf_adapter_config:
                 base = hf_adapter_config['base_model_name_or_path']
                 if self.model_base is None:
                     self.model_base = base
                 elif self.model_base != base:
                     raise ValueError(f"Model base {self.model_base} does not match adapter base {base}")
-        elif (model_to_load_path / 'base.json_e').exists():
-            hf_model_config = json.loads((model_to_load_path / 'base.json_e').read_text())
+        elif (model_to_load_path / 'base.json').exists():
+            hf_model_config = json.loads((model_to_load_path / 'base.json').read_text())
             if '_name_or_path' in hf_model_config:
                 base = hf_model_config['_name_or_path']
                 if self.model_base is None:
