@@ -385,7 +385,7 @@ class Llama(LlamaHyperparameters):
             input_lens.extend(len(x) for x in batch.data['input_ids'])
             with ez.shush():
                 batch_dict = {k: v.to('cuda') for k, v in batch.items()}
-                gen = self.model.generate(
+                gen = self.model.respond(
                     **batch_dict,
                     generation_config=config,
                     pad_token_id=self.tokenizer.eos_token_id

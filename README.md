@@ -34,7 +34,7 @@ Until you get access to the model, you can use the [NousResearch version](https:
 ### Generate Text
 
 ```python
-generated = llama.generate("Please list 5 unique mammals.")
+generated = llama.respond("Please list 5 unique mammals.")
 print(generated)
 ```
 
@@ -46,7 +46,7 @@ prompts = [
     "Please list 5 unique birds.",
     "Please list 5 unique reptiles."
 ]
-generations = llama.generate(prompts)
+generations = llama.respond(prompts)
 for p, g in zip(prompts, generations):
     print(p, g)
 ```

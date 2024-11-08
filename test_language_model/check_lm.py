@@ -18,7 +18,7 @@ data_capital_langs = ez.File(root / 'capital_langs.json').load()
 def eval(model, tests, assertion=True):
     total_correct = 0
     for prompt, answer in tests:
-        generated = model.generate(prompt)
+        generated = model.respond(prompt)
         print('\n', prompt, '==>', generated)
         correct = alpha(answer) in alpha(generated)
         if assertion and not correct:

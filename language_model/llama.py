@@ -151,7 +151,7 @@ class LlamaHypers(Config):
 class LlamaConfig(LlamaHypers):
     """Complete configuration for a Llama model, including implementation-level params."""
     checkpoint_to_load: str|None = None
-    """Path to a specific checkpoint to load. This overrides base and model_to_load to resume training from a specific checkpoint, including the optimizer state."""
+    """Path to a specific checkpoint to load. This overrides base and model_to_load to resume training from a specific checkpoint, including the optimizer slots."""
     load_locally_saved_models_only: bool = False
     """Whether to load models only from the local cache, not from the Hugging Face model hub."""
     gradient_checkpointing: bool = True
@@ -278,6 +278,7 @@ class Llama(LlamaConfig):
         pad_side: str = None,
         trunc_segments_side: str = None,
         max_segments: int = None,
+        max_output_length: int = None,
         gen_batch_size: int = None,
         num_beams: int = None,
         temperature: float = None,
@@ -297,6 +298,9 @@ class Llama(LlamaConfig):
             max_segments=max_segments)
         generation_config = hf.GenerationConfig(
             max_length=max_sequence_length,
+            max_new_tokens=max_output_length,
+            num_beams=num_beams,
+            repetition_penalty=repetition_penalty,
             pad_token_id=self.tokenizer.tokenizer.pad_token_id,
         )
         generated_results = []
