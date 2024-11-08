@@ -7,7 +7,6 @@ import copy as cp
 import re
 
 import ezpyzy as ez
-from dataclasses import dataclass; vars().update(dataclass=ez.config) # noqa, black magic type hinting
 
 from language_model.tokens.token_sequence import TokenSequence
 from language_model.tokens.token_sequences import TokenSequences
@@ -19,7 +18,7 @@ import typing as T
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
 
 
-@dataclass
+@dc.dataclass
 class TokenSlot(ez.Config):
     name: str = 'text'
     is_label: bool = False
@@ -37,7 +36,7 @@ class TokenSlot(ez.Config):
 
 Slot = str | TokenSlot
 
-@dataclass
+@dc.dataclass
 class InputSlot(TokenSlot):
     name: str = 'input'
     is_label: bool = False
@@ -67,7 +66,7 @@ def Input(
     return ...
 vars().update(Input=InputSlot)
 
-@dataclass
+@dc.dataclass
 class OutputSlot(TokenSlot):
     name: str = 'output'
     is_label: bool = True
@@ -145,13 +144,12 @@ class Template(metaclass=TemplateMeta):
 
 TT = T.TypeVar('TT', bound=Template)
 
-
-@dataclass
+@dc.dataclass
 class TemplateConfig(ez.Config, T.Generic[TT]):
     template: TT = None
     """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as and_unconfigured for each slot in the template::
 
-    @dataclass
+    @dc.dataclass
     class MyTemplate(Template):
         template = 'This is a <adjective> <noun>.'
         adjective: Slot = Input() 

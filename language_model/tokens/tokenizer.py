@@ -3,6 +3,8 @@ from __future__ import annotations
 import abc
 
 
+
+
 class Tokenizer(abc.ABC):
 
     @abc.abstractmethod
@@ -27,7 +29,6 @@ class Tokenizer(abc.ABC):
     @abc.abstractmethod
     def slot_affix_replacements(self) -> dict[str, str]:
         """Replacements for special characters in slot prefixes and suffixes."""
-
 
 
 def HuggingfaceTokenizer(
