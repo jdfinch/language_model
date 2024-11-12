@@ -329,7 +329,7 @@ class Llama(LlamaHyperparameters):
                     inference_mode=False
                 )
                 self.model = peft.get_peft_model(self.model, peft_parameters) # noqa
-                self.model.base_model.model.enable_input_require_grads()
+                self.model.base_model.model_path.enable_input_require_grads()
         self.model.train()
         dataloader = self._set_up_dataloader(
             inputs, outputs, self.actual_train_batch_size(), shuffle=True
@@ -570,6 +570,7 @@ A: no thank you i just wanted to get that information.
 Identify the information from the above dialogue:
 hotel stars: The rating or number of stars of the hotel [0, 1, 2, 3, 4, 5, any]?''', "What is the capital of France?"])
     print('Response:', response)
+    llama3.save('ex/scratch/llama3')
 
 if __name__ == '__main__':
     main()

@@ -305,7 +305,7 @@ class T5(T5Hyperparameters):
                     inference_mode=False
                 )
                 self.model = peft.get_peft_model(self.model, peft_parameters) # noqa
-                self.model.base_model.model.enable_input_require_grads()
+                self.model.base_model.model_path.enable_input_require_grads()
         self.model.train()
         dataloader = self._set_up_dataloader(
             inputs, outputs, self.actual_train_batch_size(), shuffle=True
