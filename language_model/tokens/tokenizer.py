@@ -1,67 +1,81 @@
+
 from __future__ import annotations
 
-import abc
+import dataclasses as dc
+import sys
+import ezpyzy as ez
 
 
+@dc.dataclass
+class Tokenizer(ez.Config):
+    slot_affix_replacements: dict[str, str] = {}
+    slot_lead_pattern: str = r''
+    slot_trail_pattern: str = r''
+    pad_token_id: int = 0
 
+    def __post_init__(self):
+        super().__post_init__()
+        assert type(self) is not Tokenizer, \
+            "Use a HuggingfaceTokenizer, not Tokenizer itself."
 
-class Tokenizer(abc.ABC):
-
-    @abc.abstractmethod
     def encode(self, text: str) -> list[int]:
-        """Tokenizes text into token IDs"""
+        raise NotImplemented
 
-    @abc.abstractmethod
     def decode(self, token_ids: list[int]) -> str:
-        """Decodes token IDs into text."""
-
-    @property
-    @abc.abstractmethod
-    def slot_lead_pattern(self) -> str:
-        """Regex pattern for matching chars preceding __template_slots__ that should be included in the slot prefix."""
-
-    @property
-    @abc.abstractmethod
-    def slot_trail_pattern(self) -> str:
-        """Regex pattern for matching chars following __template_slots__ that should be included in the slot suffix."""
-
-    @property
-    @abc.abstractmethod
-    def slot_affix_replacements(self) -> dict[str, str]:
-        """Replacements for special characters in slot prefixes and suffixes."""
+        raise NotImplemented
 
 
-def HuggingfaceTokenizer(
-    tokenizer,
-    slot_lead_pattern=r' ?',
-    slot_trail_pattern=r'',
-    slot_affix_replacements:dict[str, str] = None
-) -> Tokenizer:
-    import transformers as hf
-    if isinstance(tokenizer, str):
-        tokenizer = hf.AutoTokenizer.from_pretrained(tokenizer)
-    tokenizer.pad_token = '-'
-    tokenizer.pad_token_id = tokenizer.encode(tokenizer.pad_token)[0]
-    discovered_affix_replacements = dict(
-        bos=tokenizer.bos_token,
-        eos=tokenizer.eos_token,
-        pad=tokenizer.pad_token)
-    slot_affix_replacements = {**discovered_affix_replacements, **(slot_affix_replacements or {})}
-    class HuggingfaceTokenizer(Tokenizer):
-        @property
-        def tokenizer(self):
-            return tokenizer
-        def encode(self, text: str) -> list[int]:
-            return tokenizer.encode(text, add_special_tokens=False)
-        def decode(self, token_ids: list[int]) -> str:
-            return tokenizer.decode(token_ids)
-        @property
-        def slot_lead_pattern(self) -> str:
-            return slot_lead_pattern
-        @property
-        def slot_trail_pattern(self) -> str:
-            return slot_trail_pattern
-        @property
-        def slot_affix_replacements(self) -> dict[str, str]:
-            return slot_affix_replacements
-    return HuggingfaceTokenizer()
+@dc.dataclass
+class HuggingfaceTokenizerConfig(Tokenizer):
+    repo_id: str = None
+    slot_lead_pattern: str = r" ?"
+
+    def __post_init__(self):
+        super().__post_init__()
+        assert self.repo_id is not None, \
+            "A repo_id must be provided to HuggingfaceTokenizerConfig."
+
+@dc.dataclass
+class HuggingfaceTokenizer(ez.ImplementsConfig, HuggingfaceTokenizerConfig):
+    tokenizer: ... = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        try:
+            import transformers as hf
+        except ImportError as e:
+            print('''Could not import huggingface transformers-- make sure it is installed in your python environment.''', file=sys.stderr)
+            raise e
+        if isinstance(self.repo_id, str):
+            self.tokenizer = hf.AutoTokenizer.from_pretrained(self.repo_id)
+        self.tokenizer.pad_token_id = self.tokenizer.encode('-')[0]
+        self.tokenizer.pad_token = '-'
+        self.pad_token_id = self.tokenizer.pad_token_id
+        discovered_affix_replacements = dict(
+            bos=self.tokenizer.bos_token,
+            eos=self.tokenizer.eos_token,
+            pad=self.tokenizer.pad_token)
+        self.slot_affix_replacements = {
+            **discovered_affix_replacements, **(self.slot_affix_replacements or {})}
+
+    def encode(self, text: str) -> list[int]:
+        return self.tokenizer.encode(text, add_special_tokens=False)
+
+    def decode(self, token_ids: list[int]) -> str:
+        return self.tokenizer.decode(token_ids)
+
+    def __str__(self):
+        fields = {f.name: getattr(self, f.name) for f in dc.fields(self.__config_implemented__)} # noqa
+        return f"{self.__class__.__name__}({', '.join(k+': '+repr(v) for k, v in fields.items())})"
+    __repr__ = __str__
+
+
+if __name__ == '__main__':
+
+    llama3tokenzier = HuggingfaceTokenizer(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    encoded = llama3tokenzier.encode("Hello, this is a test!")
+    print(encoded)
+    for token in encoded:
+        print(token, llama3tokenzier.decode([token]))
+
+

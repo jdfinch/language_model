@@ -41,8 +41,14 @@ class TokenSequences:
         if self.pad_to_same_length:
             prev_max_len = max(len(seq) for seq in self.sequences) if self.sequences else 0
             max_len = max(max(len(seq) for seq in to_add), prev_max_len)
-            self.sequences.extend(to_add) # noqa
-            self.pad(max_len)
+            if max_len > prev_max_len:
+                self.sequences.extend(to_add) # noqa
+                self.pad(max_len)
+            else:
+                to_add = TokenSequences(to_add, tokenizer=self.tokenizer, pad_to_same_length=False,
+                    pad_to_multiple_of=self.pad_to_multiple_of, pad_side=self.pad_side)
+                to_add.pad(max_len)
+                self.sequences.extend(to_add) # noqa
         else:
             self.sequences.extend(to_add)
         return self
@@ -58,11 +64,15 @@ class TokenSequences:
             for seq in self.sequences:
                 padding_length = max_length - len(seq)
                 if padding_length > 0:
-                    padding = [(self.tokenizer.pad_token_id, False, False)] * padding_length
+                    padding = [self.tokenizer.pad_token_id] * padding_length
                     if self.pad_side == 'L':
                         seq.token_ids = padding + seq.token_ids
+                        seq.is_attendeds = [False] * padding_length + seq.is_attendeds
+                        seq.is_labels = [False] * padding_length + seq.is_labels
                     else:
                         seq.token_ids += padding
+                        seq.is_attendeds += [False] * padding_length
+                        seq.is_labels += [False] * padding_length
 
     def dict(self, seq_type: type|callable = list):
         """Returns the input_ids, attention_mask, and labels for all sequences."""

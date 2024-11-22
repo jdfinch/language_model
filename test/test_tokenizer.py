@@ -54,24 +54,24 @@ with test('Construct Templates', crash=True):
 with test('Construct Llama3 Templates Group'):
 
     @dc.dataclass
-    class Llama3Templates(lmt.TokenTemplates):
+    class Llama3Templates(lmt.TemplateTokenizer):
         tokenizer = ll3_tokenizer
         sequence_prefix = '<|begin_of_text|>'
-        turn: lmt.TemplateConfig[Turn] = Turn
-        document: lmt.TemplateConfig[Document] = Document
-        system_roleplay_instruction: lmt.TemplateConfig[SystemRoleplayInstruction] = SystemRoleplayInstruction
+        turn: lmt.SegmentTemplate[Turn] = Turn
+        document: lmt.SegmentTemplate[Document] = Document
+        system_roleplay_instruction: lmt.SegmentTemplate[SystemRoleplayInstruction] = SystemRoleplayInstruction
 
 
 with test('Configure Llama3 Templates Tokenization'):
     tokenizer = Llama3Templates(
-        document=lmt.TemplateConfig(
+        document=lmt.SegmentTemplate(
             template=Document(
                 title=lmt.Input(truncatable=False),
                 document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
             ),
             trunc_segment_rank=1,
         ),
-        turn=lmt.TemplateConfig(
+        turn=lmt.SegmentTemplate(
             template=Turn(text=Input(max=20)),
             trunc_content=False,
             trunc_segment=True,
@@ -139,14 +139,14 @@ with test('Tokenize Llama3 Data'):
 
 with test('Tokenize with Truncation', crash=True):
     tokenizer = Llama3Templates(
-        document=lmt.TemplateConfig(
+        document=lmt.SegmentTemplate(
             template=SystemRoleplayInstruction(
                 title=lmt.Input(truncatable=False),
                 document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
             ),
             trunc_segment_rank=1,
         ),
-        turn=lmt.TemplateConfig(
+        turn=lmt.SegmentTemplate(
             template=Turn(),
             trunc_content=False,
             trunc_segment=True,

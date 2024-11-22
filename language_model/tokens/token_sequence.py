@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy as cp
 import dataclasses as dc
+import ezpyzy as ez
 import ezpyzy.ansi as ansi
 
 from language_model.tokens.tokenizer import Tokenizer

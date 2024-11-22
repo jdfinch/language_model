@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import dataclasses as dc
 import itertools as it
+import functools as ft
 import copy as cp
 import re
 
-import ezpyzy as ez
+from pandas.core.window.doc import template_returns
 
-import transformers as hf
+import ezpyzy as ez
 
 from language_model.tokens.tokenizer import Tokenizer
 from language_model.tokens.token_sequence import TokenSequence, Token
 from language_model.tokens.token_sequences import TokenSequences
 from language_model.tokens.template import (
-    Template, Slot, TokenSlot, InputSlot, OutputSlot, TemplateConfig)
+    Template, Slot, TokenSlot, Input, Output, SegmentTemplate)
 
 import typing as T
 
@@ -22,20 +23,20 @@ default: T.Any = object()
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
 
 
-class TokenTemplatesMeta(type):
-    def __new__(typ, name, bases, attrs):
-        cls = super().__new__(typ, name, bases, attrs)
-        if len(bases) > 0:
-            assert isinstance(getattr(cls, 'tokenizer', None), Tokenizer), \
-                f"TokenTemplates subclass {cls} must define a tokenizer attribute of type Tokenizer."
-        for name, attr in attrs.items():
-            if isinstance(attr, type) and issubclass(attr, Template) and getattr(attr, 'tokenizer', None) is None:
-                attr.tokenizer = attrs.get('tokenizer', None)
-        return cls
+@dc.dataclass
+class Templates(ez.MultiConfig[SegmentTemplate]):
+    def __post_init__(self):
+        super().__post_init__()
+        for name, template in self:
+            if isinstance(template, type) and issubclass(template, Template):
+                is_configured = name in self.configured
+                segment_template = SegmentTemplate(template=template())
+                setattr(self, name, segment_template)
+                self.configured.set(name, segment_template, configured=is_configured)
 
 @dc.dataclass
-class TokenTemplates(metaclass=TokenTemplatesMeta):
-    tokenizer = None
+class TemplateTokenizer(ez.Config):
+    templates: Templates = Templates()
     sequence_prefix = ''
     sequence_suffix = ''
     max_length: int = None
@@ -43,27 +44,21 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
     pad_to_multiple_of: int = 8
     pad_side: str = 'L'
     max_segments: int | None = None
+    tokenizer: Tokenizer = None
 
     def __post_init__(self):
-        self.tokenizer: Tokenizer
-        self.templates: dict[type[Template], TemplateConfig] = {}
-        template_fields = {field.name for field in fields(self)} - token_templates_base_fields
-        if self.__class__ is TokenTemplates:
-            raise ValueError(f"No templates are defined in the base TokenTemplates class. Initialize an instance of a TokenTemplates subclass with at least one TokenTemplate.")
-        for field in fields(self):
-            if field.name in template_fields:
-                template = getattr(self, field.name, None)
-                if isinstance(template, type) and issubclass(template, Template):
-                    template = TemplateConfig(template=template())
-                    setattr(self, field.name, template)
-                self.templates[field.default] = getattr(self, field.name)
-        if self.sequence_prefix:
-            self.sequence_prefix = TokenSequence(self.sequence_prefix, tokenizer=self.tokenizer)
-        if self.sequence_suffix:
-            self.sequence_suffix = TokenSequence(self.sequence_suffix, tokenizer=self.tokenizer)
-        for template_type, template in self.templates.items():
-            template = TemplateConfig(template)
-            template_text = template.template.template
+        super().__post_init__()
+        self.sequence_prefix_tokens = TokenSequence(self.sequence_prefix, tokenizer=self.tokenizer)
+        self.sequence_suffix_tokens = TokenSequence(self.sequence_suffix, tokenizer=self.tokenizer)
+        self.templates_tokens: dict[str, TokenSequence] = {}
+        self.slot_trunc_text_tokens: dict[tuple[str, str], TokenSequence] = {}
+        self.template_name_map: dict[str, SegmentTemplate] = {}
+        self.template_slots: dict[str, list[TokenSlot]] = {}
+        for _, template in self.templates:
+            if not isinstance(template, SegmentTemplate):
+                continue
+            template_name = template.name
+            template_text = template.template
             slot_pattern = re.compile(
                 f"(?P<slot_lead>{self.tokenizer.slot_lead_pattern})" +
                 r"<(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)>" +
@@ -75,61 +70,81 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
                 slot_name = slot_match.group('slot_name')
                 slot_lead = slot_match.group('slot_lead')
                 slot_trail = slot_match.group('slot_trail')
-                if slot_name in template.template.__template_slots__:
-                    slot = template.template.__template_slots__[slot_name]
-                    slot_config = getattr(template.template, slot_name)
-                    slot = slot | slot_config
+                if slot_name in template.slots and isinstance(slot:=getattr(template.slots, slot_name), TokenSlot):
                     start, end = slot_match.span()
                     template_parts.append(template_text[previous_end:start])
-                    slot |= TokenSlot(prefix=slot_lead + slot.prefix, suffix=slot.suffix + slot_trail)
+                    with slot.configured.not_configuring():
+                        slot.prefix = slot_lead + slot.prefix
+                        slot.suffix = slot.suffix + slot_trail
                     slots.append(slot)
                     previous_end = end
-                template_suffix = template_text[previous_end:]
-                template.tokens = TokenSequence(
-                    '', is_attended=template.is_attended, is_label=template.is_label, tokenizer=self.tokenizer)
-                for template_part, slot in zip(template_parts, slots):
-                    template.tokens += template_part
-                    slot.index = len(template.tokens)
-                    for name, value in self.tokenizer.slot_affix_replacements.items():
-                        if value is None: continue
-                        if isinstance(slot.prefix, str):
-                            slot.prefix = slot.prefix.replace(name, value)
-                        if isinstance(slot.suffix, str):
-                            slot.suffix = slot.suffix.replace(name, value)
-                        if isinstance(slot.trunc_text, str):
-                            slot.trunc_text = slot.trunc_text.replace(name, value)
-                    slot.trunc_text = TokenSequence(slot.trunc_text,
-                        is_attended=template.is_attended, is_label=slot.is_label, tokenizer=self.tokenizer)
-                    if isinstance(slot.max, float):
-                        assert slot.max > slot.min + len(slot.trunc_text), \
-                            f"Slot {slot.name} has a max value length shorter than the sum of its min value length (plus length of truncation_text tokens such as '...')."
-                    template.slots.append(slot)
-                template.tokens += template_suffix
-                self.templates[template_type] = template
+            template_suffix = template_text[previous_end:]
+            template_tokens = TokenSequence(
+                '', is_attended=template.is_attended, is_label=template.is_label, tokenizer=self.tokenizer)
+            self.template_slots[template_name] = []
+            for template_part, slot in zip(template_parts, slots):
+                template_tokens += template_part
+                slot = cp.deepcopy(slot)
+                slot.index = len(template_tokens)
+                slot_trunc_text = TokenSequence(slot.trunc_text,
+                    is_attended=template.is_attended, is_label=slot.is_label, tokenizer=self.tokenizer)
+                self.slot_trunc_text_tokens[(template_name, slot.name)] = slot_trunc_text
+                if isinstance(slot.max, float):
+                    assert slot.max > slot.min + len(slot.trunc_text), \
+                        f"Slot {slot.name} has a max value length {slot.max} shorter than the sum of its min value length {slot.min} (plus length of truncation_text tokens - {repr(slot.trunc_text)})."
+                self.template_slots[template_name].append(slot)
+            template_tokens += template_suffix
+            self.templates_tokens[template_name] = template_tokens
+            self.template_name_map[template_name] = template
+        self.templates_slot_repeats: dict[tuple[str, str], int] = {}
+        for template_name, slots in self.template_slots.items():
+            for slot in slots:
+                key = (template_name, slot.name)
+                if key in self.templates_slot_repeats:
+                    self.templates_slot_repeats[key] += 1
+                else:
+                    self.templates_slot_repeats[key] = 1
 
-    def fill(self, segments_values: list[Template]|T.Iterable[list[Template]]) -> TokenSequence|TokenSequences:
+    def fill(self,
+        segments_values: list[Template]|T.Iterable[list[Template]]|dict[str,str]|T.Iterable[dict[str,str]]
+    ) -> TokenSequence|TokenSequences:
         if not isinstance(segments_values, list) or isinstance(segments_values[0], list):
             return TokenSequences([self.fill(value) for value in segments_values],
                 pad_to_same_length=self.pad_to_same_length,
                 pad_to_multiple_of=self.pad_to_multiple_of,
                 pad_side=self.pad_side,
                 tokenizer=self.tokenizer)
-        for segment_values in segments_values:
-            assert type(segment_values) in self.templates, \
-                f"Values must be a list of {', '.join(cls.__name__ for cls in self.templates)} Template instances for TokenTemplates {type(self).__qualname__}."
 
-        # original templates and corresponding values
-        segments_values: list[Template]
-        templates = [self.templates[type(value)] for value in segments_values]
+        # get templates with corresponding values
+        template_segments_values: list[tuple[SegmentTemplate, dict[str, str]]] = []
+        for segment_values in segments_values:
+            if isinstance(segment_values, dict):
+                temp_name = segment_values['temp']
+                segment_values = {k:v for k,v in segment_values.items() if k != 'temp'}
+                template = self.template_name_map[temp_name]
+            else:
+                temp_name = segment_values.__class__.__name__
+                segment_values = dict(segment_values.__dict__)
+                template = self.template_name_map[temp_name]
+            assert set(segment_values) == {slot.name for slot in self.template_slots[temp_name]}, \
+                f"Segment values {set(segment_values)} for template {temp_name} do not match the template slots {set(slot_name for slot_name, _ in template.slots)}"
+            template_segments_values.append((template, segment_values))
+        templates: list[SegmentTemplate] = [
+            template for template, _ in template_segments_values]
+        segs_value_dicts: list[dict[str, str]] = [
+            segment_values for _, segment_values in template_segments_values]
+        templates_slots: dict[str, list[TokenSlot]] = self.template_slots
+        templates_tokens: dict[str, TokenSequence] = self.templates_tokens
+        templates_slots_repeats: dict[tuple[str, str], int] = self.templates_slot_repeats
 
         # find slot for generation
         slot_for_generation = None
         index_of_slot_for_generation = None
         index_of_segment_for_generation = None
         num_expected_out_tokens = 0
-        for i, (segment_values, template) in enumerate(zip(segments_values, templates)):
-            for j, slot in enumerate(template.slots):
-                value = getattr(segment_values, slot.name)
+        for i, (segment_values, template) in enumerate(zip(segs_value_dicts, templates)):
+            for j, slot in enumerate(slot for _, slot in template.slots):
+                value = segment_values[slot.name]
                 if value is Ellipsis:
                     slot_for_generation = slot
                     index_of_slot_for_generation = j
@@ -141,17 +156,23 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
 
         # truncate segments after segment with output, and slots from segment with output
         if index_of_segment_for_generation is not None:
-            segments_values = segments_values[:index_of_segment_for_generation+1]
+            segs_value_dicts = segs_value_dicts[:index_of_segment_for_generation+1]
             templates = templates[:index_of_segment_for_generation+1]
             template_with_generation = templates[index_of_segment_for_generation]
-            template_with_generation = cp.deepcopy(template_with_generation)
-            template_with_generation.slots = template_with_generation.slots[:index_of_slot_for_generation]
-            template_with_generation.tokens = template_with_generation.tokens[:slot_for_generation.index]
-            templates[index_of_segment_for_generation] = template_with_generation
+            templates_slots = cp.copy(templates_slots)
+            templates_tokens = cp.copy(templates_tokens)
+            templates_slots_repeats = cp.copy(templates_slots_repeats)
+            gen_tmp_name = template_with_generation.name
+            template_slots = templates_slots[gen_tmp_name]
+            temp_tokens = templates_tokens[gen_tmp_name]
+            templates_tokens[gen_tmp_name] = temp_tokens[:template_slots[index_of_slot_for_generation].index]
+            for slot in template_slots[index_of_slot_for_generation:]:
+                templates_slots_repeats[(gen_tmp_name, slot.name)] -= 1
+            templates_slots[gen_tmp_name] = template_slots[:index_of_slot_for_generation]
 
-        # create segments table where original templates/segments_values indices are IDs
+        # create segments table where original templates/segs_value_dicts indices are IDs
         segments_table = {i: (template, segment_values)
-            for i, (template, segment_values) in enumerate(zip(templates, segments_values))}
+            for i, (template, segment_values) in enumerate(zip(templates, segs_value_dicts))}
         _segments_table_template, _segments_table_values = 0, 1
 
         # sort segments by trunc_rank, trunc_side, and truncability (and filter by truncability)
@@ -172,8 +193,8 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
         # tokenize all value sequences in remaining segments
         segs_value_seqs = {i: (template, list[TokenSequence]()) for i, (template, _) in segments_table.items()}
         for i, (template, segment_values) in segments_table.items():
-            for slot in template.slots:
-                value_text = ''.join((slot.prefix, getattr(segment_values, slot.name), slot.suffix))
+            for slot in templates_slots[template.name]:
+                value_text = ''.join((slot.prefix, segment_values[slot.name], slot.suffix))
                 value_seq = TokenSequence(value_text,
                     is_attended=True, is_label=slot.is_label, tokenizer=self.tokenizer)
                 segs_value_seqs[i][1].append(value_seq)
@@ -181,12 +202,14 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
         # compute min and max tokens of each slot
         slot_value_table = {}  # (seg_idx, slot_idx) -> (slot, value, min, max)
         for i, (template, seg_value_seqs) in segs_value_seqs.items():
-            for j, (slot, seq) in enumerate(zip(template.slots, seg_value_seqs)):
+            for j, (slot, seq) in enumerate(zip(templates_slots[template.name], seg_value_seqs)):
                 if slot.truncatable and template.trunc_content:
-                    min_tokens = min(slot.min + len(slot.trunc_text), len(seq))
+                    trunc_text_len = len(self.slot_trunc_text_tokens[(template.name, slot.name)])
+                    min_tokens = min(slot.min + trunc_text_len, len(seq))
                     max_tokens = max(min(len(seq), len(seq) if slot.max is None else slot.max), min_tokens)
                 else:
-                    max_tokens = min_tokens = len(seq)
+                    max_tokens = len(seq)
+                    min_tokens = len(seq)
                 slot_value_table[(i, j)] = (slot, seq, min_tokens, max_tokens)
         _slot_value_table_slot, _slot_value_table_seq = 0, 1
         _slot_value_table_min, _slot_value_table_max = 2, 3
@@ -207,7 +230,7 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
         # calculate current total length if we truncated and merged all segments as-is
         current_len = (num_expected_out_tokens +
             sum(max_tokens for _, _, _, max_tokens in slot_value_table.values()) +
-            sum(len(template.tokens) for template, _ in segs_value_seqs.values()))
+            sum(len(templates_tokens[template.name]) for template, _ in segs_value_seqs.values()))
 
         # register truncations for slots and segments
         slots_with_content_trunc = []
@@ -270,27 +293,83 @@ class TokenTemplates(metaclass=TokenTemplatesMeta):
             previous_slot_index = 0
             for j, value_seq in enumerate(seg_value_seqs):
                 slot, _, min_tokens, max_tokens = slot_value_table[(i, j)]
-                final_seq += template.tokens[previous_slot_index:slot.index]
+                final_seq += self.templates_tokens[template.name][previous_slot_index:slot.index]
                 previous_slot_index = slot.index
                 if len(value_seq) > max_tokens:
                     if slot.trunc_side == 'L':
-                        final_seq += slot.trunc_text
+                        final_seq += self.slot_trunc_text_tokens[(template.name, slot.name)]
                         final_seq += value_seq[-max_tokens:]
                     else:
                         final_seq += value_seq[:max_tokens]
-                        final_seq += slot.trunc_text
+                        final_seq += self.slot_trunc_text_tokens[(template.name, slot.name)]
                 else:
                     final_seq += value_seq
-            final_seq += template.tokens[previous_slot_index:]
-        if self.sequence_suffix:
+            final_seq += templates_tokens[template.name][previous_slot_index:]
+        if self.sequence_suffix and slot_for_generation is not None:
             final_seq += self.sequence_suffix
         return final_seq
 
-token_templates_base_fields = {field.name for field in fields(TokenTemplates)}
-
 
 if __name__ == '__main__':
-    pass
+
+    from language_model.tokens.tokenizer import HuggingfaceTokenizer
+
+    @dc.dataclass
+    class MyTemplate(Template):
+        template = 'This is a <adjective> <noun>. The <noun> is <phrase>!\n\n'
+        adjective: Slot = Input()
+        noun: Slot = Input()
+        phrase: Slot = Output()
+        
+    @dc.dataclass
+    class MyTurn(Template):
+        template = '<speaker> says, "<quote>"'
+        speaker: Slot = Input()
+        quote: Slot = Input()
+        
+
+    @dc.dataclass
+    class MyTemplates(Templates):
+        my_template: SegmentTemplate = SegmentTemplate(template=MyTemplate())
+        my_turn: SegmentTemplate = SegmentTemplate(template=MyTurn())
+
+    ########################################################################################.
+    
+    tokenizer = TemplateTokenizer(
+        templates=MyTemplates(
+            my_template=SegmentTemplate(
+                template=MyTemplate(adjective=Input(max=24, min=16), phrase=Input()),
+                trunc_segment_rank=3.0
+            ),
+            my_turn=SegmentTemplate(
+                template=MyTurn(speaker=Input(), quote=Output()),
+                trunc_segment_rank=1.5
+            )
+        ),
+        max_length=128,
+        pad_to_same_length=True,
+        tokenizer=HuggingfaceTokenizer(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    )
+    
+    data = [
+        [
+            MyTemplate(adjective='big', noun='dog', phrase='happy'),
+            MyTurn(speaker='Alice', quote=...)
+        ],
+        [
+            MyTemplate(adjective='small', noun='cat', phrase='sad'),
+            MyTurn(speaker='Bob', quote='Goodbye, this is a test!')
+        ]
+    ]
+
+    # print(tokenizer.configured.json())
+
+    seqs = tokenizer.fill(data)
+
+    for seq in seqs:
+        print('|'.join(seq.tokens()))
+        print('\n\n')
+
 
 
 

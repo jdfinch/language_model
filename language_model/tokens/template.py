@@ -9,7 +9,6 @@ import re
 import ezpyzy as ez
 
 from language_model.tokens.token_sequence import TokenSequence
-from language_model.tokens.token_sequences import TokenSequences
 from language_model.tokens.tokenizer import Tokenizer
 
 import typing as T
@@ -31,7 +30,9 @@ class TokenSlot(ez.Config):
     min_out: int = 0
     prefix: str|TokenSequence = ''
     suffix: str|TokenSequence = ''
-    index: int = 0
+
+    def __post_init__(self):
+        self.index: int = 0
 
 
 Slot = str | TokenSlot
@@ -98,55 +99,32 @@ vars().update(Output=OutputSlot)
 
 
 class TemplateMeta(type):
-    template: str = None
-    __template_slots__: dict[str, TokenSlot]
-    def __new__(typ, name, bases, attrs):
-        cls = super().__new__(typ, name, bases, attrs)
-        setattr(cls, '__template_slots__', {})
-        for base in bases:
-            if getattr(base, '__template_slots__', None):
-                cls.__template_slots__.update(base.__template_slots__)
-        if len(bases) > 1:
-            assert isinstance(attrs.get('template'), str), \
-                f"Class {name} must define a class attribute 'template' with a template string."
-        cls.template = str(cls.template)
-        for slot_name, value in attrs.items():
-            if isinstance(value, TokenSlot):
-                assert '<'+slot_name+'>' in cls.template, \
-                    f"Slot {slot_name} was defined as a class field of {name} but not in template text:  {cls.template}"
-                value = TokenSlot(value, name=slot_name)
-                cls.__template_slots__[slot_name] = value
-                setattr(cls, slot_name, dc.field(default_factory=ft.partial(cp.copy, value)))
-        return cls
-
-    def __iter__(self) -> T.Iterator[TokenSlot]:
-        return iter(self.__template_slots__.values())
+    def __new__(cls, name, bases, dct):
+        if bases:
+            assert 'template' in dct and isinstance(dct['template'], str), \
+                f"Template class {name} must define a template string."
+            template = dct['template']
+            for attr, value in dct.items():
+                if isinstance(value, TokenSlot):
+                    dct[attr] = dc.field(default_factory=ft.partial(cp.copy, value))
+                    assert f"<{attr}>" in template, \
+                        f"Slot <{attr}> was defined as a class field of {name} but not in template text:  {template}"
+        return super().__new__(cls, name, bases, dct)
 
 class Template(metaclass=TemplateMeta):
-    template: str
-    __template_slots__: dict[str, TokenSlot]
-
-    def __iter__(self):
-        return iter(self.__template_slots__)
-
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-    def __str__(self):
-        text = self.template
-        for slot_name, slot in self.__template_slots__.items():
-            value = getattr(self, slot_name)
-            if isinstance(value, TokenSlot):
-                value = f"<{value.name}>"
-            text = text.replace(f"<{slot_name}>", value)
-        return text
+    pass
 
 
-TT = T.TypeVar('TT', bound=Template)
+
+slot_pattern = re.compile(r"<.*?>")
 
 @dc.dataclass
-class TemplateConfig(ez.Config, T.Generic[TT]):
-    template: TT = None
+class TemplateSlots(ez.MultiConfig[TokenSlot]):
+    pass
+
+@dc.dataclass
+class SegmentTemplate(ez.Config):
+    template: str|Template = None
     """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as and_unconfigured for each slot in the template::
 
     @dc.dataclass
@@ -155,6 +133,8 @@ class TemplateConfig(ez.Config, T.Generic[TT]):
         adjective: Slot = Input() 
         noun: Slot = Input()
     """
+    slots: TemplateSlots = TemplateSlots()
+    name: str = None
     is_attended: bool = True
     is_label: bool = False
     trunc_content: bool = True
@@ -162,8 +142,76 @@ class TemplateConfig(ez.Config, T.Generic[TT]):
     trunc_segment_if_no_content: bool = True
     trunc_segment_rank: float = 1.0
     trunc_segment_side: str = 'L'
+    tokenizer: Tokenizer = None
 
     def __post_init__(self):
-        assert isinstance(self.template, Template), \
-            f"TemplateConfig must be initialized with a Template object, but got {self.template}."
-        self.slots: list[TokenSlot] = []
+        super().__post_init__()
+        if isinstance(self.template, str) and not self.configured.has.slots:
+            for match in slot_pattern.findall(self.template):
+                slot_name = match[1:-1]
+                if slot_name not in self.slots:
+                    if slot_name == 'output':
+                        self.slots[slot_name] = OutputSlot(name=slot_name)
+                    else:
+                        self.slots[slot_name] = InputSlot(name=slot_name)
+        else:
+            template = self.template
+            self.template = template.template
+            for slot_name, slot in vars(template).items():
+                if isinstance(slot, TokenSlot):
+                    assert f"<{slot_name}>" in self.template, \
+                        f"Slot {slot_name} was defined as a class field of {template.__class__.__name__} but not in template text:  {self.template}"
+                    slot_copy = cp.deepcopy(slot)
+                    self.slots[slot_name] = slot_copy
+                    slot_copy.name = slot_name
+            self.name = template.__class__.__name__
+        assert isinstance(self.name, str), \
+            "SegmentTemplate must have a name attribute, either as a string or from the template class name."
+
+
+if __name__ == '__main__':
+
+    @dc.dataclass
+    class MyTemplate(Template):
+        template = 'This is a <adjective> <noun>. The <noun> is <phrase>!'
+        adjective: Slot = Input()
+        noun: Slot = Input()
+        phrase: Slot = Output()
+
+
+    template = MyTemplate()
+    print(template)
+
+    filled = MyTemplate(adjective='big', noun='dog', phrase='happy')
+    print(filled, '\n')
+
+
+    template = SegmentTemplate(template=MyTemplate(
+        adjective=Input(max=24, min=16)
+    ), trunc_content=False, trunc_segment_rank=1.5)
+
+    print(template.configured.json())
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
