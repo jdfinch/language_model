@@ -293,7 +293,9 @@ class TemplateTokenizer(ez.Config):
                     trunc_tokens = self.slot_trunc_text_tokens[(template.name, slot.name)]
                     if slot.trunc_side == 'L':
                         final_seq += trunc_tokens
-                        final_seq += value_seq[len(trunc_tokens)-max_tokens:]
+                        trunc_index = len(trunc_tokens) - max_tokens
+                        if trunc_index < 0:
+                            final_seq += value_seq[trunc_index:]
                     else:
                         final_seq += value_seq[:max_tokens-len(trunc_tokens)]
                         final_seq += self.slot_trunc_text_tokens[(template.name, slot.name)]

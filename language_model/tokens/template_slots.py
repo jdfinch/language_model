@@ -24,6 +24,7 @@ class TokenSlot(ez.Config):
     suffix: str = ''
 
     def __post_init__(self):
+        super().__post_init__()
         self.index: int = 0
 
 

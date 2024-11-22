@@ -137,7 +137,7 @@ with test('Tokenize Llama3 Data'):
 
 
 with test('Tokenize with Truncation'):
-    for max_length in range(100, 80, -1):
+    for max_length in range(40, 0, -1):
         tokenizer = tok.TemplateTokenizer(
             templates=Llama3Templates(
                 system_roleplay_instruction=tok.SegmentTemplate(
