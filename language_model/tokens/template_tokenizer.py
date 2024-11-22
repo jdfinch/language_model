@@ -290,17 +290,18 @@ class TemplateTokenizer(ez.Config):
                 final_seq += templates_tokens[template.name][previous_slot_index:slot.index]
                 previous_slot_index = slot.index
                 if len(value_seq) > max_tokens:
+                    trunc_tokens = self.slot_trunc_text_tokens[(template.name, slot.name)]
                     if slot.trunc_side == 'L':
-                        final_seq += self.slot_trunc_text_tokens[(template.name, slot.name)]
-                        final_seq += value_seq[-max_tokens:]
+                        final_seq += trunc_tokens
+                        final_seq += value_seq[len(trunc_tokens)-max_tokens:]
                     else:
-                        final_seq += value_seq[:max_tokens]
+                        final_seq += value_seq[:max_tokens-len(trunc_tokens)]
                         final_seq += self.slot_trunc_text_tokens[(template.name, slot.name)]
                 else:
                     final_seq += value_seq
             final_seq += templates_tokens[template.name][previous_slot_index:]
-        if self.sequence_suffix and slot_for_generation is not None:
-            final_seq += self.sequence_suffix
+        if self.sequence_suffix_tokens and slot_for_generation is not None:
+            final_seq += self.sequence_suffix_tokens
         return final_seq
 
 
