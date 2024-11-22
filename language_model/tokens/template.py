@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import dataclasses as dc
-import functools as ft
 import copy as cp
+import functools as ft
 import re
+from multiprocessing.managers import Token
 
 import ezpyzy as ez
 
-from language_model.tokens.token_sequence import TokenSequence
+from language_model.tokens.template_slots import TokenSlot, InputSlot, OutputSlot, TemplateSlots
 from language_model.tokens.tokenizer import Tokenizer
 
 import typing as T
@@ -16,111 +17,46 @@ import typing as T
 
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
 
-
-@dc.dataclass
-class TokenSlot(ez.Config):
-    name: str = 'text'
-    is_label: bool = False
-    max: int = None
-    min: int = 0
-    truncatable: bool = True
-    trunc_side: str = 'L'
-    trunc_rank: float = 1.0
-    trunc_text: str|TokenSequence = '...'
-    min_out: int = 0
-    prefix: str|TokenSequence = ''
-    suffix: str|TokenSequence = ''
-
-    def __post_init__(self):
-        self.index: int = 0
-
-
-Slot = str | TokenSlot
-
-@dc.dataclass
-class InputSlot(TokenSlot):
-    name: str = 'input'
-    is_label: bool = False
-    max: int = None
-    min: int = 0
-    truncatable: bool = True
-    trunc_side: str = 'L'
-    trunc_rank: float = 1.0
-    trunc_text: str|TokenSequence = '...'
-    min_out: int = 0
-    prefix: str|TokenSequence = ''
-    suffix: str|TokenSequence = ''
-
-def Input(
-    name: str = 'input',
-    is_label: bool = False,
-    max: int = None,
-    min: int = 0,
-    truncatable: bool = True,
-    trunc_side: str = 'L',
-    trunc_rank: float = 1.0,
-    trunc_text: str|TokenSequence = '...',
-    min_out: int = 0,
-    prefix: str|TokenSequence = '',
-    suffix: str|TokenSequence = '',
-) -> str|InputSlot:
-    return ...
-vars().update(Input=InputSlot)
-
-@dc.dataclass
-class OutputSlot(TokenSlot):
-    name: str = 'output'
-    is_label: bool = True
-    max: int = None
-    min: int = 0
-    truncatable: bool = True
-    trunc_side: str = 'R'
-    trunc_rank: float = 1.0
-    trunc_text: str|TokenSequence = ''
-    min_out: int = 0
-    prefix: str|TokenSequence = ''
-    suffix: str|TokenSequence = '{eos}'
-
-def Output(
-    name: str = 'output',
-    is_label: bool = True,
-    max: int = None,
-    min: int = 0,
-    truncatable: bool = True,
-    trunc_side: str = 'R',
-    trunc_rank: float = 1.0,
-    trunc_text: str|TokenSequence = '',
-    min_out: int = 0,
-    prefix: str|TokenSequence = '',
-    suffix: str|TokenSequence = '{eos}',
-) -> str|OutputSlot:
-    return ...
-vars().update(Output=OutputSlot)
+slot_pattern = re.compile(r"<.*?>")
 
 
 class TemplateMeta(type):
     def __new__(cls, name, bases, dct):
         if bases:
-            assert 'template' in dct and isinstance(dct['template'], str), \
+            assert 'template' in dct and isinstance(dct['template'], (str, Template)), \
                 f"Template class {name} must define a template string."
-            template = dct['template']
             for attr, value in dct.items():
                 if isinstance(value, TokenSlot):
-                    dct[attr] = dc.field(default_factory=ft.partial(cp.copy, value))
+                    dct[attr] = TokenSlot(value, name=attr)
+            def get_template_str(tmp):
+                if isinstance(tmp, Template):
+                    tmp_text = tmp.template
+                    for attr, value in vars(tmp).items():
+                        if isinstance(value, str):
+                            tmp_text = tmp_text.replace(f"<{attr}>", value)
+                        elif isinstance(value, Template):
+                            tmp_text = tmp_text.replace(f"<{attr}>", get_template_str(value))
+                    return tmp_text
+                else:
+                    return tmp
+            template = get_template_str(dct['template'])
+            dct['template'] = template
+            for attr, value in dct.items():
+                if isinstance(value, TokenSlot):
                     assert f"<{attr}>" in template, \
                         f"Slot <{attr}> was defined as a class field of {name} but not in template text:  {template}"
+                    dct[attr] = dc.field(default_factory=ft.partial(cp.copy, value))
         return super().__new__(cls, name, bases, dct)
 
 class Template(metaclass=TemplateMeta):
-    pass
+    template: str | Template = None
 
-
-
-slot_pattern = re.compile(r"<.*?>")
-
-@dc.dataclass
-class TemplateSlots(ez.MultiConfig[TokenSlot]):
-    pass
+    def __str__(self):
+        template = self.template
+        for attr, value in vars(self).items():
+            if isinstance(value, str):
+                template = template.replace(f"<{attr}>", value)
+        return template
 
 @dc.dataclass
 class SegmentTemplate(ez.Config):
@@ -170,6 +106,8 @@ class SegmentTemplate(ez.Config):
 
 
 if __name__ == '__main__':
+
+    from language_model.tokens.template_slots import Slot, Input, Output
 
     @dc.dataclass
     class MyTemplate(Template):

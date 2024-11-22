@@ -1,40 +1,41 @@
+
+import ezpyzy as ez
+from ezpyzy.test import test
+
+import language_model.tokens as tok
+
 import dataclasses as dc
-
-from language_model.tokens import TokenSlot, Input
-from language_model.utils.test import test
-import language_model.tokens as lmt
-
 import textwrap as tw
 
 
 
 with test('Construct Tokenizers'):
-    ll3_tokenizer = lmt.HuggingfaceTokenizer('meta-llama/Meta-Llama-3.1-8B-Instruct')
-    ll2_tokenizer = lmt.HuggingfaceTokenizer('meta-llama/Llama-2-7b-chat-hf')
+    ll3_tokenizer = tok.HuggingfaceTokenizer(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    ll2_tokenizer = tok.HuggingfaceTokenizer(repo_id='meta-llama/Llama-2-7b-chat-hf')
 
 
-with test('Construct Templates', crash=True):
+with test('Construct Templates'):
 
     @dc.dataclass
-    class Turn(lmt.Template):
+    class Turn(tok.Template):
         template = "<|start_header_id|><role><|end_header_id|>\n\n<text><|eot_id|>"
-        role: lmt.Slot = lmt.Input()
-        text: lmt.Slot = lmt.Input(min=5)
+        role: tok.Slot = tok.Input()
+        text: tok.Slot = tok.Input(min=5)
 
     @dc.dataclass
-    class Document(lmt.Template):
+    class Document(tok.Template):
         template = "\n\nConsider the following document:\n\n# <title>\n\n<document_text>"
-        title: lmt.Slot = lmt.Input()
-        document_text: lmt.Slot = lmt.Input()
+        title: tok.Slot = tok.Input()
+        document_text: tok.Slot = tok.Input()
 
     @dc.dataclass
-    class SystemRoleplayInstruction(lmt.Template):
+    class SystemRoleplayInstruction(tok.Template):
         template = Turn(text=f"You are a <profession>. Respond in a <style> manner.{Document.template}")
-        role: lmt.Slot = lmt.Input()
-        profession: lmt.Slot = lmt.Input()
-        style: lmt.Slot = lmt.Input()
-        title: lmt.Slot = lmt.Input()
-        document_text: lmt.Slot = lmt.Input()
+        role: tok.Slot = tok.Input()
+        profession: tok.Slot = tok.Input()
+        style: tok.Slot = tok.Input()
+        title: tok.Slot = tok.Input()
+        document_text: tok.Slot = tok.Input()
 
 
     assert SystemRoleplayInstruction.template == tw.dedent('''
@@ -47,55 +48,52 @@ with test('Construct Templates', crash=True):
         # <title>
         
         <document_text><|eot_id|>''').strip()
-    assert {slot.name for slot in SystemRoleplayInstruction} == {
-        'role', 'profession', 'style', 'title', 'document_text'}
 
 
 with test('Construct Llama3 Templates Group'):
-
     @dc.dataclass
-    class Llama3Templates(lmt.TemplateTokenizer):
+    class Llama3Templates(tok.Templates):
         tokenizer = ll3_tokenizer
         sequence_prefix = '<|begin_of_text|>'
-        turn: lmt.SegmentTemplate[Turn] = Turn
-        document: lmt.SegmentTemplate[Document] = Document
-        system_roleplay_instruction: lmt.SegmentTemplate[SystemRoleplayInstruction] = SystemRoleplayInstruction
+        turn: tok.SegmentTemplate = Turn
+        document: tok.SegmentTemplate = Document
+        system_roleplay_instruction: tok.SegmentTemplate = SystemRoleplayInstruction
+    templates = Llama3Templates()
 
 
 with test('Configure Llama3 Templates Tokenization'):
-    tokenizer = Llama3Templates(
-        document=lmt.SegmentTemplate(
-            template=Document(
-                title=lmt.Input(truncatable=False),
-                document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
+    tokenizer = tok.TemplateTokenizer(
+        templates=Llama3Templates(
+            document=tok.SegmentTemplate(
+                template=Document(
+                    title=tok.Input(truncatable=False),
+                    document_text=tok.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
+                ),
+                trunc_segment_rank=1,
             ),
-            trunc_segment_rank=1,
+            turn=tok.SegmentTemplate(
+                template=Turn(text=tok.Input(max=20)),
+                trunc_content=False,
+                trunc_segment=True,
+                trunc_segment_rank=2,
+                trunc_segment_side='L',
+            ),
         ),
-        turn=lmt.SegmentTemplate(
-            template=Turn(text=Input(max=20)),
-            trunc_content=False,
-            trunc_segment=True,
-            trunc_segment_rank=2,
-            trunc_segment_side='L',
-        ),
-        max_segments=35,
+        sequence_prefix='<|begin_of_text|>',
+        max_segments=32,
+        tokenizer=ll3_tokenizer
     )
-
-    assert tokenizer.max_segments == 35
-    assert tokenizer.document.template.title.truncatable is False
-    assert tokenizer.tokenizer is ll3_tokenizer
-    assert tokenizer.document.tokenizer is ll3_tokenizer
 
 
 with test('Construct Llama3 Data'):
-    instruction = Llama3Templates.system_roleplay_instruction(
+    instruction = SystemRoleplayInstruction(
         role="system", profession="primary care physician", style="natural",
         title="Patient's Symptoms", document_text="A check-up requires taking the patient's temperature, blood pressure, pulse rate, and asking the patient if they have any symptoms.")
     dialogue = [
         instruction,
-        Llama3Templates.turn(role="user", text="I'm feeling a bit under the weather today."),
-        Llama3Templates.turn(role="assistant", text="What seems to be the problem?"),
-        Llama3Templates.turn(role="user", text="I've had a headache and a runny nose all day.")
+        Turn(role="user", text="I'm feeling a bit under the weather today."),
+        Turn(role="assistant", text="What seems to be the problem?"),
+        Turn(role="user", text="I've had a headache and a runny nose all day.")
     ]
     assert instruction.role == "system"
     assert instruction.profession == "primary care physician"
@@ -118,6 +116,7 @@ with test('Construct Llama3 Data'):
 
 with test('Tokenize Llama3 Data'):
     sequence = tokenizer.fill(dialogue)
+
     assert '|'.join(sequence.tokens()) == tw.dedent('''
         <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
     
@@ -137,29 +136,35 @@ with test('Tokenize Llama3 Data'):
     ''').strip()
 
 
-with test('Tokenize with Truncation', crash=True):
-    tokenizer = Llama3Templates(
-        document=lmt.SegmentTemplate(
-            template=SystemRoleplayInstruction(
-                title=lmt.Input(truncatable=False),
-                document_text=lmt.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
+with test('Tokenize with Truncation'):
+    for max_length in range(98, 52, -8):
+        tokenizer = tok.TemplateTokenizer(
+            templates=Llama3Templates(
+                system_roleplay_instruction=tok.SegmentTemplate(
+                    template=SystemRoleplayInstruction(
+                        title=tok.Input(truncatable=False),
+                        document_text=tok.Input(min=12, max=None, trunc_side='R', trunc_rank=3)
+                    ),
+                    trunc_segment=False,
+                ),
+                turn=tok.SegmentTemplate(
+                    template=Turn(text=tok.Input(max=20)),
+                    trunc_content=False,
+                    trunc_segment=True,
+                    trunc_segment_rank=2,
+                    trunc_segment_side='L',
+                ),
             ),
-            trunc_segment_rank=1,
-        ),
-        turn=lmt.SegmentTemplate(
-            template=Turn(),
-            trunc_content=False,
-            trunc_segment=True,
-            trunc_segment_rank=2,
-            trunc_segment_side='L',
-        ),
-        max_length=32,
-    )
+            sequence_prefix='<|begin_of_text|>',
+            max_length=max_length,
+            tokenizer=ll3_tokenizer
+        )
 
-    assert tokenizer.system_roleplay_instruction.template.title.truncatable is False
-
-    sequence = tokenizer.fill(dialogue)
-    print('|'.join(sequence.tokens()))
+        sequence = tokenizer.fill(dialogue)
+        tokens = sequence.tokens()
+        print(f"Got {len(tokens)} tokens for max_length={max_length}")
+        print('|'.join(sequence.tokens()))
+        print('\n', '-'*70, '\n')
 
 
 

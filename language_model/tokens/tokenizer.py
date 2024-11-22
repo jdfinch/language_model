@@ -46,6 +46,7 @@ class HuggingfaceTokenizer(ez.ImplementsConfig, HuggingfaceTokenizerConfig):
         except ImportError as e:
             print('''Could not import huggingface transformers-- make sure it is installed in your python environment.''', file=sys.stderr)
             raise e
+        self.tokenizer: hf.PreTrainedTokenizer
         if isinstance(self.repo_id, str):
             self.tokenizer = hf.AutoTokenizer.from_pretrained(self.repo_id)
         self.tokenizer.pad_token_id = self.tokenizer.encode('-')[0]

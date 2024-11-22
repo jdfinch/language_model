@@ -2,19 +2,16 @@ from __future__ import annotations
 
 import dataclasses as dc
 import itertools as it
-import functools as ft
 import copy as cp
 import re
-
-from pandas.core.window.doc import template_returns
 
 import ezpyzy as ez
 
 from language_model.tokens.tokenizer import Tokenizer
-from language_model.tokens.token_sequence import TokenSequence, Token
+from language_model.tokens.token_sequence import TokenSequence
 from language_model.tokens.token_sequences import TokenSequences
-from language_model.tokens.template import (
-    Template, Slot, TokenSlot, Input, Output, SegmentTemplate)
+from language_model.tokens.template_slots import Slot, Input, Output, TokenSlot
+from language_model.tokens.template import Template, SegmentTemplate
 
 import typing as T
 
@@ -37,8 +34,8 @@ class Templates(ez.MultiConfig[SegmentTemplate]):
 @dc.dataclass
 class TemplateTokenizer(ez.Config):
     templates: Templates = Templates()
-    sequence_prefix = ''
-    sequence_suffix = ''
+    sequence_prefix: str = ''
+    sequence_suffix: str = ''
     max_length: int = None
     pad_to_same_length: bool = True
     pad_to_multiple_of: int = 8
@@ -96,14 +93,6 @@ class TemplateTokenizer(ez.Config):
             template_tokens += template_suffix
             self.templates_tokens[template_name] = template_tokens
             self.template_name_map[template_name] = template
-        self.templates_slot_repeats: dict[tuple[str, str], int] = {}
-        for template_name, slots in self.template_slots.items():
-            for slot in slots:
-                key = (template_name, slot.name)
-                if key in self.templates_slot_repeats:
-                    self.templates_slot_repeats[key] += 1
-                else:
-                    self.templates_slot_repeats[key] = 1
 
     def fill(self,
         segments_values: list[Template]|T.Iterable[list[Template]]|dict[str,str]|T.Iterable[dict[str,str]]
@@ -135,7 +124,6 @@ class TemplateTokenizer(ez.Config):
             segment_values for _, segment_values in template_segments_values]
         templates_slots: dict[str, list[TokenSlot]] = self.template_slots
         templates_tokens: dict[str, TokenSequence] = self.templates_tokens
-        templates_slots_repeats: dict[tuple[str, str], int] = self.templates_slot_repeats
 
         # find slot for generation
         slot_for_generation = None
@@ -161,13 +149,10 @@ class TemplateTokenizer(ez.Config):
             template_with_generation = templates[index_of_segment_for_generation]
             templates_slots = cp.copy(templates_slots)
             templates_tokens = cp.copy(templates_tokens)
-            templates_slots_repeats = cp.copy(templates_slots_repeats)
             gen_tmp_name = template_with_generation.name
             template_slots = templates_slots[gen_tmp_name]
             temp_tokens = templates_tokens[gen_tmp_name]
             templates_tokens[gen_tmp_name] = temp_tokens[:template_slots[index_of_slot_for_generation].index]
-            for slot in template_slots[index_of_slot_for_generation:]:
-                templates_slots_repeats[(gen_tmp_name, slot.name)] -= 1
             templates_slots[gen_tmp_name] = template_slots[:index_of_slot_for_generation]
 
         # create segments table where original templates/segs_value_dicts indices are IDs
@@ -179,7 +164,7 @@ class TemplateTokenizer(ez.Config):
         seg_trunc_cands = dict(ez.sort([(i, (template, segment_values))
                 for i, (template, segment_values) in segments_table.items()
                 if template.trunc_segment and i != index_of_segment_for_generation],
-            by=[(template.trunc_segment_rank, template.trunc_segment_side)
+            by=[(-template.trunc_segment_rank, template.trunc_segment_side)
                 for i, (template, _) in segments_table.items()
                 if template.trunc_segment and i != index_of_segment_for_generation]))
         _seg_trunc_cands_template, _seg_trunc_cands_values = 0, 1
@@ -220,7 +205,7 @@ class TemplateTokenizer(ez.Config):
             for (i, j), (slot, seq, min_tokens, max_tokens) in slot_value_table.items()
             if min_tokens < max_tokens
         ], by=[
-            (slot.trunc_rank, slot.trunc_side)
+            (-slot.trunc_rank, slot.trunc_side)
             for (i, _), (slot, _, min_tokens, max_tokens) in slot_value_table.items()
             if min_tokens < max_tokens
         ]))
@@ -228,9 +213,11 @@ class TemplateTokenizer(ez.Config):
         _slot_trunc_cands_min, _slot_trunc_cands_max = 2, 3
 
         # calculate current total length if we truncated and merged all segments as-is
-        current_len = (num_expected_out_tokens +
-            sum(max_tokens for _, _, _, max_tokens in slot_value_table.values()) +
-            sum(len(templates_tokens[template.name]) for template, _ in segs_value_seqs.values()))
+        current_len = (num_expected_out_tokens
+                       + len(self.sequence_prefix_tokens)
+                       + (len(self.sequence_suffix_tokens) if slot_for_generation is None else 0)
+            + sum(max_tokens for _, _, _, max_tokens in slot_value_table.values())
+            + sum(len(templates_tokens[template.name]) for template, _ in segs_value_seqs.values()))
 
         # register truncations for slots and segments
         slots_with_content_trunc = []
@@ -251,15 +238,17 @@ class TemplateTokenizer(ez.Config):
                     raise ValueError(f"Current length {current_len} exceeds max length {self.max_length} but no more truncation candidates are available.")
             elif next_seg_to_trunc is None:
                 (i, j), (slot, seq, min_tokens, max_tokens) = next_slot_to_trunc
-                if i in segments_table and amount_to_trunc >= len(slot.trunc_text):
+                if i in segs_value_seqs and amount_to_trunc >= len(
+                    self.slot_trunc_text_tokens[(templates[i].name, slot.name)]):
                     do_trunc_slot = True
                 else:
                     next_slot_to_trunc = next(iter_slot_trunc_cands, None)
             else:
                 (_, (template, seg_value_seqs)) = next_seg_to_trunc
                 (i, j), (slot, seq, min_tokens, max_tokens) = next_slot_to_trunc
-                if (i in segments_table and amount_to_trunc >= len(slot.trunc_text) and
-                  (slot.trunc_rank, slot.trunc_side) > (template.trunc_segment_rank, template.trunc_segment_side)
+                if (i in segments_table and amount_to_trunc >= len(
+                    self.slot_trunc_text_tokens[(templates[i].name, slot.name)]) and
+                  slot.trunc_rank >= template.trunc_segment_rank
                 ):
                     do_trunc_slot = True
                 else:
@@ -273,27 +262,32 @@ class TemplateTokenizer(ez.Config):
                 next_slot_to_trunc = next(iter_slot_trunc_cands, None)
             elif do_trunc_seg:
                 i, (template, seg_value_seqs) = next_seg_to_trunc
-                current_len -= len(template.tokens)
-                for j in range(len(template.slots)):
+                current_len -= len(templates_tokens[template.name])
+                for j in range(len(seg_value_seqs)):
                     slot_trunc_cands.pop((i, j), None)
                     current_len -= slot_value_table[(i, j)][_slot_value_table_max]
-                del segments_table[i]
+                del segs_value_seqs[i]
                 next_seg_to_trunc = next(iter_seg_trunc_cands, None)
 
         # recover some tokens from truncation
         for (i, j), (slot, seq, min_tokens, max_tokens) in reversed(slots_with_content_trunc):
             if current_len >= self.max_length: break
-            recover_amount = min(slot.max - max_tokens, self.max_length - current_len) # noqa
+            if i not in segs_value_seqs: continue
+            left_to_recover = self.max_length - current_len
+            slot_can_recover = len(seq) - max_tokens
+            if slot.max is not None:
+                slot_can_recover = min(slot_can_recover, slot.max - max_tokens)
+            recover_amount = min(left_to_recover, slot_can_recover)
             current_len += recover_amount
             slot_value_table[(i, j)] = (slot, seq, min_tokens, max_tokens + recover_amount)
 
         # create final token sequence
-        final_seq = TokenSequence(self.sequence_prefix or '', tokenizer=self.tokenizer)
+        final_seq = TokenSequence(self.sequence_prefix_tokens or '', tokenizer=self.tokenizer)
         for i, (template, seg_value_seqs) in segs_value_seqs.items():
             previous_slot_index = 0
             for j, value_seq in enumerate(seg_value_seqs):
                 slot, _, min_tokens, max_tokens = slot_value_table[(i, j)]
-                final_seq += self.templates_tokens[template.name][previous_slot_index:slot.index]
+                final_seq += templates_tokens[template.name][previous_slot_index:slot.index]
                 previous_slot_index = slot.index
                 if len(value_seq) > max_tokens:
                     if slot.trunc_side == 'L':
