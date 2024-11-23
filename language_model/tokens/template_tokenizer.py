@@ -36,7 +36,7 @@ class TemplateTokenizer(ez.Config):
     templates: Templates = Templates()
     sequence_prefix: str = ''
     sequence_suffix: str = ''
-    max_length: int = None
+    max_length: int|None = None
     pad_to_same_length: bool = True
     pad_to_multiple_of: int = 8
     pad_side: str = 'L'

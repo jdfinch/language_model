@@ -137,38 +137,143 @@ with test('Tokenize Llama3 Data'):
 
 
 with test('Tokenize with Truncation'):
-    for max_length in range(40, 0, -1):
-        tokenizer = tok.TemplateTokenizer(
-            templates=Llama3Templates(
-                system_roleplay_instruction=tok.SegmentTemplate(
-                    template=SystemRoleplayInstruction(
-                        title=tok.Input(truncatable=False),
-                        document_text=tok.Input(min=12, max=None, trunc_side='R', trunc_rank=3)
-                    ),
-                    trunc_segment=False,
+    tokenizer = tok.TemplateTokenizer(
+        templates=Llama3Templates(
+            system_roleplay_instruction=tok.SegmentTemplate(
+                template=SystemRoleplayInstruction(
+                    title=tok.Input(truncatable=False),
+                    document_text=tok.Input(min=12, max=None, trunc_side='R', trunc_rank=3)
                 ),
-                turn=tok.SegmentTemplate(
-                    template=Turn(text=tok.Input(max=20)),
-                    trunc_content=False,
-                    trunc_segment=True,
-                    trunc_segment_rank=2,
-                    trunc_segment_side='L',
-                ),
+                trunc_segment=False,
             ),
-            sequence_prefix='<|begin_of_text|>',
-            max_length=max_length,
-            tokenizer=ll3_tokenizer
-        )
+            turn=tok.SegmentTemplate(
+                template=Turn(text=tok.Input(max=20)),
+                trunc_content=False,
+                trunc_segment=True,
+                trunc_segment_rank=2,
+                trunc_segment_side='L',
+            ),
+        ),
+        sequence_prefix='<|begin_of_text|>',
+        max_length=None,
+        tokenizer=ll3_tokenizer
+    )
 
-        sequence = tokenizer.fill(dialogue)
-        tokens = sequence.tokens()
-        print(f"Got {len(tokens)} tokens for max_length={max_length}")
-        print('|'.join(sequence.tokens()))
-        print('\n', '-'*70, '\n')
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|,| and| asking| the| patient| if| they| have| any| symptoms|.|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'m| feeling| a| bit| under| the| weather| today|.|<|eot_id|>|<|start_header_id|>|assistant|<|end_header_id|>|
+    
+    |What| seems| to| be| the| problem|?|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
 
+    tokenizer.max_length = 90
 
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|...|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'m| feeling| a| bit| under| the| weather| today|.|<|eot_id|>|<|start_header_id|>|assistant|<|end_header_id|>|
+    
+    |What| seems| to| be| the| problem|?|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
+
+    tokenizer.max_length = 80
+
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+    
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|,| and| asking| the| patient|...|<|eot_id|>|<|start_header_id|>|assistant|<|end_header_id|>|
+    
+    |What| seems| to| be| the| problem|?|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
+
+    tokenizer.max_length = 70
+
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|,| and| asking| the| patient| if| they|...|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
+
+    tokenizer.max_length = 60
+
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|...|<|eot_id|>|<|start_header_id|>|user|<|end_header_id|>|
+    
+    |I|'ve| had| a| headache| and| a| run|ny| nose| all| day|.|<|eot_id|>
+    ''').strip()
+
+    tokenizer.max_length = 50
+
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+
+    |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|,| pulse| rate|,| and| asking| the| patient|...|<|eot_id|>
+    ''').strip()
+
+    tokenizer.max_length = 40
+
+    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
+
+    |You| are| a|...|.| Respond| in| a| natural| manner|.
+    
+    |Consider| the| following| document|:
+    
+    |#| Patient|'s| Symptoms|
+    
+    |A| check|-up| requires| taking| the| patient|'s| temperature|,| blood| pressure|...|<|eot_id|>
+    ''').strip()
 
 
 
