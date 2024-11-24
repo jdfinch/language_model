@@ -5,23 +5,20 @@ import json
 import transformers as hf
 import torch as pt
 
-from language_model.lm_config import get_name_of_subclass_for_field
-
-# black magic type hinting: sneak the "base" decorator into "dataclass" var name
-from dataclasses import dataclass; vars().update(dataclass=ez.config)
+from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 
-@dataclass
+@dc.dataclass
 class Scheduler(ez.Config):
 
     def __post_init__(self):
-        get_name_of_subclass_for_field(self, Scheduler, 'schedule')
+        self.scheduler = get_name_of_subclass(self, Scheduler)
 
     def construct_scheduler(self, optimizer):
         raise TypeError("A subclass of Scheduler must be used to specify a learning rate schedule.")
 
 
-@dataclass
+@dc.dataclass
 class LinearWarmupSchedule(ez.Config):
     num_warmup_steps: int = 100
     """The number of training steps where the learning rate is linearly increased. Setting to 0 results in no warmup."""

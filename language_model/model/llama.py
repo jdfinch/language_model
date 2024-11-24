@@ -11,7 +11,7 @@ import random as rng
 
 import ezpyzy as ez
 
-import language_model.tokenizer as tok
+import language_model.tokens as tok
 import language_model.lm_config as lm_config
 
 import typing as T

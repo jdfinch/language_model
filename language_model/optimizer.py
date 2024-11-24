@@ -6,13 +6,10 @@ import transformers as hf
 import bitsandbytes as bnb
 import torch as pt
 
-from language_model.lm_config import get_name_of_subclass_for_field
-
-# black magic type hinting: sneak the "base" decorator into "dataclass" var name
-from dataclasses import dataclass; vars().update(dataclass=ez.config)
+from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 
-@dataclass
+@dc.dataclass
 class Optimizer(ez.ImmutableConfig):
     algorithm: str = None
     """The optimizer algorithm to use for training."""
@@ -21,13 +18,13 @@ class Optimizer(ez.ImmutableConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        get_name_of_subclass_for_field(self, Optimizer, 'algorithm')
+        self.algorithm = get_name_of_subclass(self, Optimizer)
 
     def construct_optimizer(self, model):
         raise TypeError("A subclass of Optimizer must be used to specify an optimizer.")
 
 
-@dataclass
+@dc.dataclass
 class Adafactor(Optimizer):
     eps: tuple[float, float] = (1e-30, 1e-3)
     """Regularization constants for square gradient and parameter scale respectively"""
@@ -54,7 +51,7 @@ class Adafactor(Optimizer):
             scale_parameter=self.scale_parameter)
 
 
-@dataclass
+@dc.dataclass
 class AdamW(Optimizer):
     betas: tuple[float, float] = (0.9, 0.999)
     """The beta values are the decay rates of the first and second-order moment of the optimizer."""

@@ -68,7 +68,7 @@ class OutputSlot(TokenSlot):
     min: int = 0
     truncatable: bool = True
     trunc_side: str = 'R'
-    trunc_rank: float = 1.0
+    trunc_rank: float = 0.0
     trunc_text: str = ''
     min_out: int = 0
     prefix: str = ''
@@ -81,7 +81,7 @@ def Output(
     min: int = 0,
     truncatable: bool = True,
     trunc_side: str = 'R',
-    trunc_rank: float = 1.0,
+    trunc_rank: float = 0.0,
     trunc_text: str = '',
     min_out: int = 0,
     prefix: str = '',

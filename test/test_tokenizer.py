@@ -154,7 +154,6 @@ with test('Tokenize with Truncation'):
                 trunc_segment_side='L',
             ),
         ),
-        sequence_prefix='<|begin_of_text|>',
         max_length=None,
         tokenizer=ll3_tokenizer
     )

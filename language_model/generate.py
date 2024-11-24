@@ -1,19 +1,13 @@
 
 import ezpyzy as ez
 import dataclasses as dc
-import pathlib as pl
-import json
+
 import transformers as hf
-import torch as pt
 
-from language_model.lm_config import get_name_of_subclass_for_field
-
-# black magic type hinting: sneak the "base" decorator into "dataclass" var name
-from dataclasses import dataclass; vars().update(dataclass=ez.config)
+from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 
-
-@dataclass
+@dc.dataclass
 class Generate(ez.Config):
     max_tokens: int = 512
     """The maximum number of tokens the model will generate."""
@@ -32,17 +26,15 @@ class Generate(ez.Config):
 
     def __post_init__(self):
         super().__post_init__()
-        get_name_of_subclass_for_field(self, Generate, 'strategy')
+        if not self.configured.has.strategy:
+            self.strategy = get_name_of_subclass(self, Generate)
 
-    def construct_hf_config(self):
+    def construct_hf_config(self) -> hf.GenerationConfig:
         raise TypeError("A subclass of Generate must be used to specify a generation strategy.")
 
 
-@dataclass
+@dc.dataclass
 class Greedy(Generate):
-    strategy: str = 'Greedy'
-    """The decoding strategy to use for generation."""
-
     def construct_hf_config(self):
         return hf.GenerationConfig(
             max_new_tokens=self.max_tokens,
@@ -52,7 +44,7 @@ class Greedy(Generate):
             no_repeat_ngram_size=self.no_repeat_ngram_size,
             do_sample=False)
 
-@dataclass
+@dc.dataclass
 class Beam(Generate):
     num_beams: int = 4
     """The number of beams to use for generation."""
@@ -62,8 +54,8 @@ class Beam(Generate):
     """A filter that keeps only the top tokens whose probability exceeds this value."""
     length_penalty: float = 0.0
     """An exponential penalty used for beam-based generation that punishes longer sequences at length_penalty < 0.0"""
-    strategy: str = 'Beam'
-    """The decoding strategy to use for generation."""
+    num_return_sequences: int = 1
+    """The number of sequences to return for each input."""
 
     def _set_num_return_sequences(self, num_return_sequences):
         assert num_return_sequences <= self.num_beams, \
@@ -93,3 +85,32 @@ class ContrastiveSample(Contrastive, Sample): pass
 
 @dc.dataclass
 class DiverseSample(Diverse, Sample): pass
+
+
+
+if __name__ == '__main__':
+
+    beam = Beam(num_beams=5)
+    print(beam.configured.json())
+    print(f"{beam.num_return_sequences = }")
+    beam.num_return_sequences = 3
+    print(f"{beam.num_return_sequences = }")
+    try:
+        beam.num_return_sequences = 6
+    except AssertionError as e:
+        print(e)
+
+    diverse_sample = Diverse(groups=2, num_beams=4)
+
+    print(diverse_sample.configured.json())
+    print(f"{diverse_sample.num_return_sequences = }")
+    print(f"{set(diverse_sample.configured.configured) = }")
+    print(f"{set(diverse_sample.configured.unconfigured) = }")
+    print(f"{diverse_sample.num_return_sequences = }")
+    diverse_sample.num_return_sequences = 3
+    print(f"{diverse_sample.num_return_sequences = }")
+    try:
+        diverse_sample.num_return_sequences = 5
+        print(f"{diverse_sample.num_return_sequences = }")
+    except AssertionError as e:
+        print(e)

@@ -31,20 +31,37 @@ class Templates(ez.MultiConfig[SegmentTemplate]):
                 setattr(self, name, segment_template)
                 self.configured.set(name, segment_template, configured=is_configured)
 
+
 @dc.dataclass
-class TemplateTokenizer(ez.Config):
+class TemplateTokenizerConfig(ez.Config):
     templates: Templates = Templates()
-    sequence_prefix: str = ''
-    sequence_suffix: str = ''
-    max_length: int|None = None
+    """Config of a Templates subclass that defines the templates that can be used for tokenization."""
+    max_length: int | None = None
+    """The maximum token length of sequences the model trains on or can be fed as input for generation."""
     pad_to_same_length: bool = True
-    pad_to_multiple_of: int = 8
+    """Whether to pad sequences to the same length within each batch."""
     pad_side: str = 'L'
+    """The side to pad sequences on. 'L' for left, 'R' for right."""
+    pad_to_multiple_of: int = 8
+    """Pads sequences so that total token_ids lengths are a multiple of this value, which can improve performance on GPU."""
     max_segments: int | None = None
+    """The maximum number of segments to keep in a token_ids. If None, no segment pruning will be performed. The primary use case for setting max_segments is to trim extremely long sequences by a number-of-segments threshold BEFORE any tokenization is performed, which can improve preprocessing efficiency."""
+    sequence_prefix: str = '{bos}'
+    """The prefix to add to the beginning of each sequence that gets tokenized."""
+    sequence_suffix: str = ''
+    """The suffix to add to the end of each sequence that gets tokenized."""
     tokenizer: Tokenizer = None
+    """The tokenizer to use for tokenization. This should be an instance of a class inheriting from Tokenizer, such as a HuggingfaceTokenizer."""
+
+@dc.dataclass
+class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
 
     def __post_init__(self):
         super().__post_init__()
+        with self.configured.not_configuring():
+            for slot, replacement in self.tokenizer.slot_affix_replacements.items():
+                self.sequence_prefix = self.sequence_prefix.replace(f'{{{slot}}}', replacement)
+                self.sequence_suffix = self.sequence_suffix.replace(f'{{{slot}}}', replacement)
         self.sequence_prefix_tokens = TokenSequence(self.sequence_prefix, tokenizer=self.tokenizer)
         self.sequence_suffix_tokens = TokenSequence(self.sequence_suffix, tokenizer=self.tokenizer)
         self.templates_tokens: dict[str, TokenSequence] = {}
