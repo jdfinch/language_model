@@ -11,7 +11,6 @@ from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 @dc.dataclass
 class Scheduler(ez.Config):
-
     def __post_init__(self):
         self.scheduler = get_name_of_subclass(self, Scheduler)
 

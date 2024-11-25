@@ -97,9 +97,9 @@ class TokenSequence:
 
     def __str__(self):
         if len(self) > 10:
-            return f'<TokenSequence len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) for t in self[:10])}|...>' # noqa
+            return f'<TokenSequence len {len(self)}: {"|".join(t.text for t in self[:10])}|...>' # noqa
         else:
-            return f'<TokenSequence len {len(self)}: {"|".join(self.tokenizer.decode(t[0]) for t in self)}>' # noqa
+            return f'<TokenSequence len {len(self)}: {"|".join(t.text for t in self)}>' # noqa
 
     def __repr__(self):
         return f"TokenSequence({repr(self.token_ids)})"

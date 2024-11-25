@@ -43,17 +43,22 @@ class Llama3Templates(tok.Templates):
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
     templates: Llama3Templates = Llama3Templates(
         response=tok.SegmentTemplate(template=Response(content=tok.Output(min_out=64))))
-    tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
     max_length: int = 256
 
 @dc.dataclass
-class Llama3TemplateTokenizer(ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
-    tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
+class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
+    templates: Llama3Templates = Llama3Templates(
+        response=tok.SegmentTemplate(template=Response(content=tok.Output(min_out=64))))
+    tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(
         repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
 
-    def __post_init__(self):
-        TemplateTokenizer.__post_init__(self) # noqa
-
 if __name__ == '__main__':
+    config = Llama3TemplateTokenizerConfig()
+    print(config.configured.json())
+
     tokenizer = Llama3TemplateTokenizer()
-    print(tokenizer.configured.json())
+    print(tokenizer.fill([
+        System(content="This is a system message."),
+        User(content="This is a user message."),
+    ]))
