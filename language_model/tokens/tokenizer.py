@@ -15,14 +15,12 @@ class Tokenizer(ez.Config):
 
     def __post_init__(self):
         super().__post_init__()
-        assert type(self) is not Tokenizer, \
-            "Use a HuggingfaceTokenizer, not Tokenizer itself."
 
     def encode(self, text: str) -> list[int]:
-        raise NotImplemented
+        raise NotImplementedError
 
     def decode(self, token_ids: list[int]) -> str:
-        raise NotImplemented
+        raise NotImplementedError
 
 
 @dc.dataclass
@@ -32,8 +30,6 @@ class HuggingfaceTokenizerConfig(Tokenizer):
 
     def __post_init__(self):
         super().__post_init__()
-        assert self.repo_id is not None, \
-            "A repo_id must be provided to HuggingfaceTokenizerConfig."
 
 @dc.dataclass
 class HuggingfaceTokenizer(ez.ImplementsConfig, HuggingfaceTokenizerConfig):
