@@ -53,11 +53,12 @@ class TemplateTokenizerConfig(ez.Config):
     tokenizer: Tokenizer = None
     """The tokenizer to use for tokenization. This should be an instance of a class inheriting from Tokenizer, such as a HuggingfaceTokenizer."""
 
+
 @dc.dataclass
 class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
 
     def __post_init__(self):
-        TemplateTokenizerConfig.__post_init__(self)
+        super().__post_init__()
         with self.configured.not_configuring():
             for slot, replacement in self.tokenizer.slot_affix_replacements.items():
                 self.sequence_prefix = self.sequence_prefix.replace(f'{{{slot}}}', replacement)

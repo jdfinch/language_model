@@ -10,7 +10,7 @@ from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 
 @dc.dataclass
-class Optimizer(ez.ImmutableConfig):
+class Optimizer(ez.Config):
     algorithm: str = None
     """The optimizer algorithm to use for training."""
     learning_rate: float = None
@@ -19,6 +19,7 @@ class Optimizer(ez.ImmutableConfig):
     def __post_init__(self):
         super().__post_init__()
         self.algorithm = get_name_of_subclass(self, Optimizer)
+        self.optimizer: pt.optim.Optimizer|None = None
 
     def construct_optimizer(self, model):
         raise TypeError("A subclass of Optimizer must be used to specify an optimizer.")

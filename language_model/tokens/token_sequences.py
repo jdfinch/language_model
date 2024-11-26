@@ -74,12 +74,17 @@ class TokenSequences:
                         seq.is_attendeds += [False] * padding_length
                         seq.is_labels += [False] * padding_length
 
-    def dict(self, seq_type: type|callable = list):
+    def dict(self, seq_type: type|callable = list, with_labels=True):
         """Returns the input_ids, attention_mask, and labels for all sequences."""
-        return dict(
-            input_ids=seq_type([seq.dict(seq_type)["input_ids"] for seq in self.sequences]),
-            attention_mask=seq_type([seq.dict(seq_type)["attention_mask"] for seq in self.sequences]),
-            labels=seq_type([seq.dict(seq_type)["labels"] for seq in self.sequences]),)
+        if with_labels:
+            return dict(
+                input_ids=seq_type([seq.token_ids for seq in self.sequences]),
+                attention_mask=seq_type([seq.is_attendeds for seq in self.sequences]),
+                labels=seq_type([seq.is_labels for seq in self.sequences]),)
+        else:
+            return dict(
+                input_ids=seq_type([seq.token_ids for seq in self.sequences]),
+                attention_mask=seq_type([seq.is_attendeds for seq in self.sequences]),)
 
     def __iter__(self):
         return iter(self.sequences)

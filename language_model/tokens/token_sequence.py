@@ -39,8 +39,8 @@ class TokenSequence:
         if isinstance(sequence, str):
             token_ids = self.tokenizer.encode(sequence)
             self.token_ids.extend(token_ids)
-            self.is_attendeds.extend([is_attended] * len(self.token_ids))
-            self.is_labels.extend([is_label] * len(self.token_ids))
+            self.is_attendeds.extend([is_attended] * len(token_ids))
+            self.is_labels.extend([is_label] * len(token_ids))
         elif isinstance(sequence, TokenSequence):
             self.token_ids.extend(sequence.token_ids)
             self.is_attendeds.extend(sequence.is_attendeds)
@@ -49,17 +49,16 @@ class TokenSequence:
         return self
     __iadd__ = extend
 
-    def dict(self, seq_type: type|callable = list):
-        if seq_type is list:
+    def dict(self, seq_type: type|callable = list, with_labels=True):
+        if with_labels:
             return dict(
-                input_ids=self.token_ids,
-                attention_mask=self.is_attendeds,
-                labels=self.is_labels,)
+                input_ids=seq_type([self.token_ids]),
+                attention_mask=seq_type([self.is_attendeds]),
+                labels=seq_type([self.is_labels]),)
         else:
             return dict(
-                input_ids=seq_type(self.token_ids),
-                attention_mask=seq_type(self.is_attendeds),
-                labels=seq_type(self.is_labels),)
+                input_ids=seq_type([self.token_ids]),
+                attention_mask=seq_type([self.is_attendeds]),)
 
     def text(self):
         return self.tokenizer.decode(self.token_ids)

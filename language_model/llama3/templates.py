@@ -50,7 +50,7 @@ class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
 class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
     templates: Llama3Templates = Llama3Templates(
         response=tok.SegmentTemplate(template=Response(content=tok.Output(min_out=64))))
-    tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(
+    tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
         repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
 
 if __name__ == '__main__':

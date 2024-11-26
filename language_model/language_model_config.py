@@ -26,7 +26,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """Quantization mode to use. If None, no quantization will be used (half-precision)."""
     load_locally_saved_models_only: bool = False
     """Whether to load models only from the local cache, not from the Hugging Face model hub."""
-    hardware_device: str = 'cuda'
+    device: str = 'cuda'
     """The hardware device to use for training and/or generation, such as 'cuda', 'cuda:7', or 'cpu'."""
     tokenizer_templates: tok.TemplateTokenizer = None
     """A Config for the tokenizer and templates to use to format sequences passed to the model."""
