@@ -1,4 +1,3 @@
-from unsloth import FastLanguageModel
 
 import ezpyzy as ez
 import dataclasses as dc
@@ -21,8 +20,8 @@ import typing as T
 
 @dc.dataclass
 class Llama3Config(LanguageModelConfig):
-    model_base: str = "unsloth/Llama-3.2-1B-Vision-Instruct"
-    tokenizer_templates: lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
+    model_base: str = "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
+    template_tokenizer: lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
 
 
 @dc.dataclass
@@ -38,20 +37,77 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         self.model: hf.LlamaForCausalLM = model
 
     def generate(self,
-        segments_values: list[Template|dict[str,str]]|T.Iterable[list[Template|dict[str,str]]]
-    ) -> str|list[str]:
-        us.FastLanguageModel.for_inference(model.model)
-        tokenized = self.tokenizer_templates.fill(segments_values)
-        tokens = tokenized.dict(with_labels=False,
-            seq_type=ft.partial(pt.tensor, dtype=pt.int, device=self.device))
-        input_length = tokens['input_ids'].shape[1]
-        responses_tokens = self.model.generate(**tokens,
-            pad_token_id=self.tokenizer_templates.tokenizer.pad_token_id)
-        responses = []
-        for response_tokens in responses_tokens:
-            response = self.tokenizer_templates.tokenizer.decode(response_tokens[input_length:-1])
-            responses.append(response)
-        return responses
+        data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
+    ) -> list[str|None]:
+        return list(self.each_generation(data))
+
+    def each_generation(self,
+        data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
+    ) -> T.Iterable[str|None]:
+        us.FastLanguageModel.for_inference(self.model)
+        if isinstance(data, list) and data and isinstance(data[0], (dict, Template)):
+            data = [data]
+        generation_groups = {}
+        response_queue = {}
+        waiting_for_response_index = 0
+        data_iterator = enumerate(data)
+        data_iteration = next(data_iterator, None)
+        generation_group_iterator = None
+        while data_iteration or generation_groups:
+            if data_iteration:
+                i, data_item = data_iteration
+                data_iteration = next(data_iterator, None)
+                gen_slot_info = self.template_tokenizer.find_gen_slot(data_item)
+                if gen_slot_info is None:
+                    response_queue[i] = None
+                    continue
+                (template_name, i_gen_segment, j_gen_slot, gen_slot
+                ) = gen_slot_info
+                eos_token_id = self.template_tokenizer.template_slots_eos[template_name, j_gen_slot]
+                max_out = gen_slot.max_out
+                generation_group_key = (max_out, eos_token_id)
+                generation_group = generation_groups.setdefault(generation_group_key, [])
+                generation_group.append((i, data_item, gen_slot_info))
+                if len(generation_group) < self.generation.batch_size:
+                    continue
+                else:
+                    del generation_groups[generation_group_key]
+            elif generation_group_iterator is None:
+                generation_group_iterator = iter(generation_groups.items())
+                continue
+            else:
+                generation_group_iteration = next(generation_group_iterator, None)
+                if generation_group_iteration is None:
+                    return
+                (max_out, eos_token_id), generation_group = generation_group_iteration
+            data_item_indices, data_batch, gen_slot_infos = zip(*generation_group)
+            tokenized_batch = self.template_tokenizer._tokenize_sequences(data_batch, gen_slot_infos)
+            tokens_batch = tokenized_batch.dict(with_labels=False,
+                seq_type=ft.partial(pt.tensor, dtype=pt.int, device=self.device))
+            input_length = tokens_batch['input_ids'].shape[1]
+            response_batch = self.model.generate(**tokens_batch,
+                pad_token_id=self.template_tokenizer.tokenizer.pad_token_id,
+                eos_token_id=eos_token_id)
+            for data_item_index, response_tokens, gen_slot_info, data_item in zip(
+                data_item_indices, response_batch, gen_slot_infos, data_batch
+            ):
+                response_tokens = response_tokens[input_length:]
+                if eos_token_id is not None:
+                    eos_token_indices = (response_tokens == eos_token_id).nonzero(as_tuple=True) # noqa
+                    if eos_token_indices:
+                        response_tokens = response_tokens[:eos_token_indices[0]]
+                response_text = self.template_tokenizer.tokenizer.decode(response_tokens)
+                response_queue[data_item_index] = response_text
+                _, segment_index, _, slot = gen_slot_info
+                setattr(data_item[segment_index], slot.name, response_text)
+                while waiting_for_response_index in response_queue:
+                    response = response_queue.pop(waiting_for_response_index)
+                    yield response
+                    waiting_for_response_index += 1
+        while waiting_for_response_index in response_queue:
+            response = response_queue.pop(waiting_for_response_index)
+            yield response
+            waiting_for_response_index += 1
 
     def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         for epoch, steps in enumerate(self.train_each_step_each_epoch(data)):
@@ -65,7 +121,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 yield ppl
 
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        FastLanguageModel.for_training(self.model)
+        us.FastLanguageModel.for_training(self.model)
         if self.training.optimizer.optimizer is None:
             self.training.optimizer.optimizer = self.training.optimizer.construct_optimizer(self.model)
         scheduler = self.training.scheduler.construct_scheduler(self.training.optimizer.optimizer)
@@ -74,7 +130,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 samples_trained = 0
                 nlls = []
                 for physical_step, batch in enumerate(ez.batching(data, size=self.training.physical_batch_size)):
-                    tokens = self.tokenizer_templates.fill(batch).dict(with_labels=True,
+                    tokens = self.template_tokenizer.tokenize(batch).dict(with_labels=True,
                         seq_type=ft.partial(pt.tensor, dtype=pt.int, device=self.device))
                     num_tokens = tokens['input_ids'].ne(-100).sum().item()
                     loss = self.model(**tokens).loss
@@ -95,7 +151,8 @@ if __name__ == '__main__':
 
     config = Llama3Config()
 
-    model = Llama3()
+    with ez.Timer('Initializing'):
+        model = Llama3()
 
     dialogue = [
         lt.System("You are a pirate."),
@@ -103,9 +160,9 @@ if __name__ == '__main__':
         lt.Response(...),
     ]
 
-    response, = model.generate(dialogue)
-
-    print(response)
+    with ez.Timer('Generating'):
+        response, = model.generate(dialogue)
+        print(response)
 
     print(f"\nGPU allocated {pt.cuda.max_memory_allocated() / 1e9:.2f} GB")
 

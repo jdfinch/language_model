@@ -28,7 +28,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """Whether to load models only from the local cache, not from the Hugging Face model hub."""
     device: str = 'cuda'
     """The hardware device to use for training and/or generation, such as 'cuda', 'cuda:7', or 'cpu'."""
-    tokenizer_templates: tok.TemplateTokenizer = None
+    template_tokenizer: tok.TemplateTokenizer = None
     """A Config for the tokenizer and templates to use to format sequences passed to the model."""
     adapters: lora.Adapters|None = lora.Adapters(primary=lora.LoRA())
     """The LoRA adapters to use for the model (set to None for full fine-tuning)."""

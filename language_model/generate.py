@@ -9,9 +9,9 @@ from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 @dc.dataclass
 class Generate(ez.Config):
-    max_tokens: int = 512
+    max_out: int = 512
     """The maximum number of tokens the model will generate."""
-    min_tokens: int = 0
+    min_out: int = 0
     """The minimum number of tokens the model will generate."""
     batch_size: int | None = None
     """The batch size to use for generation. Defaults to the actual train batch size."""
@@ -37,8 +37,8 @@ class Generate(ez.Config):
 class Greedy(Generate):
     def construct_hf_config(self):
         return hf.GenerationConfig(
-            max_new_tokens=self.max_tokens,
-            min_new_tokens=self.min_tokens,
+            max_new_tokens=self.max_out,
+            min_new_tokens=self.min_out,
             num_beams=1,
             repetition_penalty=self.repetition_penalty,
             no_repeat_ngram_size=self.no_repeat_ngram_size,

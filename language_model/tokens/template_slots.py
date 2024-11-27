@@ -19,7 +19,7 @@ class TokenSlot(ez.Config):
     trunc_side: str = 'L'
     trunc_rank: float = 1.0
     trunc_text: str = '...'
-    min_out: int = 0
+    max_out: int = 0
     prefix: str = ''
     suffix: str = ''
 
@@ -40,7 +40,7 @@ class InputSlot(TokenSlot):
     trunc_side: str = 'L'
     trunc_rank: float = 1.0
     trunc_text: str = '...'
-    min_out: int = 0
+    max_out: int = 0
     prefix: str = ''
     suffix: str = ''
 
@@ -53,7 +53,7 @@ def Input(
     trunc_side: str = 'L',
     trunc_rank: float = 1.0,
     trunc_text: str = '...',
-    min_out: int = 0,
+    max_out: int = 0,
     prefix: str = '',
     suffix: str = '',
 ) -> str|InputSlot:
@@ -70,7 +70,7 @@ class OutputSlot(TokenSlot):
     trunc_side: str = 'R'
     trunc_rank: float = 0.0
     trunc_text: str = ''
-    min_out: int = 0
+    max_out: int = 0
     prefix: str = ''
     suffix: str = '{eos}'
 
@@ -83,7 +83,7 @@ def Output(
     trunc_side: str = 'R',
     trunc_rank: float = 0.0,
     trunc_text: str = '',
-    min_out: int = 0,
+    max_out: int = 0,
     prefix: str = '',
     suffix: str = '{eos}',
 ) -> str|OutputSlot:

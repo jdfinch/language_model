@@ -115,7 +115,7 @@ with test('Construct Llama3 Data'):
 
 
 with test('Tokenize Llama3 Data'):
-    sequence = tokenizer.fill(dialogue)
+    sequence = tokenizer.tokenize(dialogue)
 
     assert '|'.join(sequence.tokens()) == tw.dedent('''
         <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
@@ -158,7 +158,7 @@ with test('Tokenize with Truncation'):
         tokenizer=ll3_tokenizer
     )
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -178,7 +178,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 90
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -198,7 +198,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 80
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
     
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -216,7 +216,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 70
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -232,7 +232,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 60
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -248,7 +248,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 50
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a| primary| care| physician|.| Respond| in| a| natural| manner|.
@@ -262,7 +262,7 @@ with test('Tokenize with Truncation'):
 
     tokenizer.max_length = 40
 
-    assert '|'.join(tokenizer.fill(dialogue).tokens()) == tw.dedent('''
+    assert '|'.join(tokenizer.tokenize(dialogue).tokens()) == tw.dedent('''
     <|begin_of_text|>|<|start_header_id|>|system|<|end_header_id|>|
 
     |You| are| a|...|.| Respond| in| a| natural| manner|.
