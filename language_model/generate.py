@@ -9,11 +9,11 @@ from language_model.utils.get_name_of_subclass import get_name_of_subclass
 
 @dc.dataclass
 class Generate(ez.Config):
-    max_out: int = 512
+    max_out: int = 64
     """The maximum number of tokens the model will generate."""
     min_out: int = 0
     """The minimum number of tokens the model will generate."""
-    batch_size: int | None = None
+    batch_size: int = 1
     """The batch size to use for generation. Defaults to the actual train batch size."""
     num_beams: int = 1
     """The number of beams to use for generation."""
@@ -30,7 +30,7 @@ class Generate(ez.Config):
             self.strategy = get_name_of_subclass(self, Generate)
 
     def construct_hf_config(self) -> hf.GenerationConfig:
-        raise TypeError("A subclass of Generate must be used to specify a generation strategy.")
+        raise TypeError("A subclass of Generate implementing construct_hf_config must be used to specify a generation strategy.")
 
 
 @dc.dataclass

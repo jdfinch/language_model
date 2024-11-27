@@ -23,6 +23,11 @@ class Llama3Config(LanguageModelConfig):
     model_base: str = "unsloth/Llama-3.2-1B-Instruct-bnb-4bit"
     template_tokenizer: lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
 
+    def __post_init__(self):
+        super().__post_init__()
+        if self.generation and self.training and not self.generation.configured.has.batch_size:
+            self.generation.batch_size = self.training.physical_batch_size
+
 
 @dc.dataclass
 class Llama3(ez.ImplementsConfig, Llama3Config):
@@ -45,6 +50,9 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
     ) -> T.Iterable[str|None]:
         us.FastLanguageModel.for_inference(self.model)
+        generation_config = self.generation.construct_hf_config()
+        global_max_out = self.generation.max_out if self.generation.configured.has.max_out else None
+        generation_config.pad_token_id = self.template_tokenizer.tokenizer.pad_token_id
         if isinstance(data, list) and data and isinstance(data[0], (dict, Template)):
             data = [data]
         generation_groups = {}
@@ -64,7 +72,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 (template_name, i_gen_segment, j_gen_slot, gen_slot
                 ) = gen_slot_info
                 eos_token_id = self.template_tokenizer.template_slots_eos[template_name, j_gen_slot]
-                max_out = gen_slot.max_out
+                max_out = gen_slot.max
                 generation_group_key = (max_out, eos_token_id)
                 generation_group = generation_groups.setdefault(generation_group_key, [])
                 generation_group.append((i, data_item, gen_slot_info))
@@ -83,19 +91,19 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             data_item_indices, data_batch, gen_slot_infos = zip(*generation_group)
             tokenized_batch = self.template_tokenizer._tokenize_sequences(data_batch, gen_slot_infos)
             tokens_batch = tokenized_batch.dict(with_labels=False,
-                seq_type=ft.partial(pt.tensor, dtype=pt.int, device=self.device))
+                seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
             input_length = tokens_batch['input_ids'].shape[1]
-            response_batch = self.model.generate(**tokens_batch,
-                pad_token_id=self.template_tokenizer.tokenizer.pad_token_id,
-                eos_token_id=eos_token_id)
+            generation_config.eos_token_id = eos_token_id
+            generation_config.max_new_tokens = max_out if global_max_out is None else global_max_out
+            response_batch = self.model.generate(**tokens_batch, generation_config=generation_config)
             for data_item_index, response_tokens, gen_slot_info, data_item in zip(
                 data_item_indices, response_batch, gen_slot_infos, data_batch
             ):
                 response_tokens = response_tokens[input_length:]
                 if eos_token_id is not None:
-                    eos_token_indices = (response_tokens == eos_token_id).nonzero(as_tuple=True) # noqa
-                    if eos_token_indices:
-                        response_tokens = response_tokens[:eos_token_indices[0]]
+                    eos_token_indices = (response_tokens == eos_token_id).nonzero() # noqa
+                    if eos_token_indices.numel():
+                        response_tokens = response_tokens[:eos_token_indices[0].item()]
                 response_text = self.template_tokenizer.tokenizer.decode(response_tokens)
                 response_queue[data_item_index] = response_text
                 _, segment_index, _, slot = gen_slot_info
@@ -131,7 +139,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 nlls = []
                 for physical_step, batch in enumerate(ez.batching(data, size=self.training.physical_batch_size)):
                     tokens = self.template_tokenizer.tokenize(batch).dict(with_labels=True,
-                        seq_type=ft.partial(pt.tensor, dtype=pt.int, device=self.device))
+                        seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                     num_tokens = tokens['input_ids'].ne(-100).sum().item()
                     loss = self.model(**tokens).loss
                     nlls.append(loss.item() / num_tokens)

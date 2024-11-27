@@ -5,14 +5,96 @@ import dataclasses as dc
 import copy as cp
 import functools as ft
 import re
-from multiprocessing.managers import Token
 
 import ezpyzy as ez
 
-from language_model.tokens.template_slots import TokenSlot, InputSlot, OutputSlot, TemplateSlots
 from language_model.tokens.tokenizer import Tokenizer
 
-import typing as T
+
+@dc.dataclass
+class TokenSlot(ez.Config):
+    name: str = 'text'
+    is_label: bool = False
+    max: int|None = None
+    min: int = 0
+    trunc: bool = True
+    trunc_side: str = 'L'
+    trunc_rank: float = 1.0
+    trunc_text: str = '...'
+    prefix: str = ''
+    suffix: str = ''
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.token_index: int = None # noqa
+        self.template: 'SegmentTemplate' = None # noqa
+        self.slot_index: int = None # noqa
+
+
+Slot = str | TokenSlot
+
+@dc.dataclass
+class InputSlot(TokenSlot):
+    name: str = 'input'
+    is_label: bool = False
+    max: int|None = None
+    min: int = 0
+    trunc: bool = True
+    trunc_side: str = 'L'
+    trunc_rank: float = 1.0
+    trunc_text: str = '...'
+    prefix: str = ''
+    suffix: str = ''
+
+def Input(
+    name: str = 'input',
+    is_label: bool = False,
+    max: int|None = None,
+    min: int = 0,
+    trunc: bool = True,
+    trunc_side: str = 'L',
+    trunc_rank: float = 1.0,
+    trunc_text: str = '...',
+    prefix: str = '',
+    suffix: str = '',
+) -> str|InputSlot:
+    return ...
+vars().update(Input=InputSlot)
+
+@dc.dataclass
+class OutputSlot(TokenSlot):
+    name: str = 'output'
+    is_label: bool = True
+    max: int|None = None
+    min: int = 0
+    trunc: bool = True
+    trunc_side: str = 'R'
+    trunc_rank: float = 0.0
+    trunc_text: str = ''
+    prefix: str = ''
+    suffix: str = '{eos}'
+
+def Output(
+    name: str = 'output',
+    is_label: bool = True,
+    max: int|None = None,
+    min: int = 0,
+    trunc: bool = True,
+    trunc_side: str = 'R',
+    trunc_rank: float = 0.0,
+    trunc_text: str = '',
+    prefix: str = '',
+    suffix: str = '{eos}',
+) -> str|OutputSlot:
+    return ...
+vars().update(Output=OutputSlot)
+
+
+
+
+@dc.dataclass
+class TemplateSlots(ez.MultiConfig[TokenSlot]):
+    pass
 
 
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
@@ -106,8 +188,6 @@ class SegmentTemplate(ez.Config):
 
 
 if __name__ == '__main__':
-
-    from language_model.tokens.template_slots import Slot, Input, Output
 
     @dc.dataclass
     class MyTemplate(Template):

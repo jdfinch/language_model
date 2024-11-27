@@ -9,5 +9,4 @@ from language_model.llama3.templates import (
     System,
     User,
     Assistant,
-    Response,
 )

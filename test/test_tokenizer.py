@@ -66,7 +66,7 @@ with test('Configure Llama3 Templates Tokenization'):
         templates=Llama3Templates(
             document=tok.SegmentTemplate(
                 template=Document(
-                    title=tok.Input(truncatable=False),
+                    title=tok.Input(trunc=False),
                     document_text=tok.Input(min=8, max=16, trunc_side='R', trunc_rank=3)
                 ),
                 trunc_segment_rank=1,
@@ -141,7 +141,7 @@ with test('Tokenize with Truncation'):
         templates=Llama3Templates(
             system_roleplay_instruction=tok.SegmentTemplate(
                 template=SystemRoleplayInstruction(
-                    title=tok.Input(truncatable=False),
+                    title=tok.Input(trunc=False),
                     document_text=tok.Input(min=12, max=None, trunc_side='R', trunc_rank=3)
                 ),
                 trunc_segment=False,

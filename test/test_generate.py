@@ -11,11 +11,7 @@ from language_model.generate import Greedy
 
 
 with ez.test("Construct Llama 3"):
-    model = llama.Llama3(
-        template_tokenizer=llama.Llama3TemplateTokenizer(max_length=128),
-        generation=Greedy(max_out=28, batch_size=3)
-    )
-    model.template_tokenizer.templates.response.slots.content.max_out = 10
+    model = llama.Llama3(generation=Greedy(batch_size=3))
 
 with ez.test("Create data"):
     captial_langs = json.loads(pl.Path('test/capital_langs.json').read_text())
@@ -24,9 +20,11 @@ with ez.test("Create data"):
         prompt = [
             llama.System("Give an exact answer in one or two words"),
             llama.User(f"What languages are spoken in {capital}?"),
-            llama.Response(...),
+            llama.Assistant(...),
             llama.User("Tell me more please!"),
-            llama.Response(...),
+            llama.Assistant(...),
+            llama.User("Summarize everything you've told me in one sentence."),
+            llama.Assistant(...)
         ]
         prompts.append(prompt)
 
@@ -58,3 +56,7 @@ with ez.test("Llama3 chained generation"):
     while model.generate(chat) != [None]: continue
     print('\n'.join(str(s) for s in chat))
 
+with ez.test("Prompt truncation throughout chained generation"):
+    chat = cp.deepcopy(prompts[0])
+    while (response:=model.generate(chat)) != [None]:
+        print('|'.join(model.template_tokenizer.tokenize(chat).tokens()), '\n\n\n')

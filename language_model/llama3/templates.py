@@ -16,40 +16,33 @@ class System(tok.Template):
 class User(tok.Template):
     """A user turn in an instruction chat."""
     template = "<|start_header_id|>user<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Input()
+    content: tok.Slot = tok.Input(trunc_side='R', trunc=False)
 
 @dc.dataclass
 class Assistant(tok.Template):
     """An assistant turn in an instruction chat."""
     template = "<|start_header_id|>assistant<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Input()
-
-@dc.dataclass
-class Response(tok.Template):
-    """An assistant turn in an instruction chat."""
-    template = "<|start_header_id|>assistant<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Output()
+    content: tok.Slot = tok.Output(trunc_side='R')
 
 
 @dc.dataclass
 class Llama3Templates(tok.Templates):
-    system: tok.SegmentTemplate = tok.SegmentTemplate(template=System())
-    user: tok.SegmentTemplate = tok.SegmentTemplate(template=User(), trunc_segment=True)
-    assistant: tok.SegmentTemplate = tok.SegmentTemplate(template=Assistant(), trunc_segment=True)
-    response: tok.SegmentTemplate = tok.SegmentTemplate(template=Response())
+    system: tok.SegmentTemplate|System = tok.SegmentTemplate(template=System())
+    user: tok.SegmentTemplate|User = tok.SegmentTemplate(
+        template=User(), trunc_segment=True, trunc_segment_rank=2)
+    assistant: tok.SegmentTemplate|Assistant = tok.SegmentTemplate(
+        template=Assistant(content=tok.Output(max=64)), trunc_segment=True, trunc_segment_rank=2)
 
 
 @dc.dataclass
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
-    templates: Llama3Templates = Llama3Templates(
-        response=tok.SegmentTemplate(template=Response(content=tok.Output(max_out=64))))
+    templates: Llama3Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
     max_length: int = 256
 
 @dc.dataclass
 class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
-    templates: Llama3Templates = Llama3Templates(
-        response=tok.SegmentTemplate(template=Response(content=tok.Output(max_out=64))))
+    templates: Llama3Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
         repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
 
