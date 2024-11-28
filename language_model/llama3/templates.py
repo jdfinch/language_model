@@ -16,23 +16,23 @@ class System(tok.Template):
 class User(tok.Template):
     """A user turn in an instruction chat."""
     template = "<|start_header_id|>user<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Input(trunc_side='R', trunc=False)
+    content: tok.Slot = tok.Input(trunc_side='R', trunc_rank=1)
 
 @dc.dataclass
 class Assistant(tok.Template):
     """An assistant turn in an instruction chat."""
-    template = "<|start_header_id|>assistant<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Output(trunc_side='R')
+    template = "<|start_header_id|>assistant<|end_header_id|>\n\n<content>"
+    content: tok.Slot = tok.Output(trunc_side='R', trunc_rank=1, trunc_text='...')
 
 
 @dc.dataclass
 class Llama3Templates(tok.Templates):
-    system: tok.SegmentTemplate|System = tok.SegmentTemplate(template=System())
+    system: tok.SegmentTemplate|System = tok.SegmentTemplate(
+        template=System(), trunc_segment=False)
     user: tok.SegmentTemplate|User = tok.SegmentTemplate(
-        template=User(), trunc_segment=True, trunc_segment_rank=2)
+        template=User(), trunc_segment=True, trunc_segment_rank=1)
     assistant: tok.SegmentTemplate|Assistant = tok.SegmentTemplate(
-        template=Assistant(content=tok.Output(max=64)), trunc_segment=True, trunc_segment_rank=2)
-
+        template=Assistant(), trunc_segment=True, trunc_segment_rank=1)
 
 @dc.dataclass
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
