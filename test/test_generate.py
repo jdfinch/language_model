@@ -1,4 +1,3 @@
-from re import template
 
 import ezpyzy as ez
 import json
@@ -12,6 +11,8 @@ from language_model.generate import Greedy
 
 with ez.test("Construct Llama 3"):
     model = llama.Llama3(
+        model_base='unsloth/Llama-3.2-3B-Instruct',
+        quantization=None,
         template_tokenizer=llama.Llama3TemplateTokenizer(max_length=128, max_out=64),
         generation=Greedy(batch_size=3))
 
@@ -20,7 +21,7 @@ with ez.test("Create data"):
     prompts = []
     for capital, languages in captial_langs.items():
         prompt = [
-            llama.System("Give an exact answer in one or two words"),
+            llama.System("Give a long answer in as much detail as possible."),
             llama.User(f"What languages are spoken in {capital}?"),
             llama.Assistant(...),
             llama.User("Can you please tell me more? Provide details of history and culture. Use quotes from real people and sources."),
@@ -54,13 +55,10 @@ with ez.test("Llama 3 generation (batched)"):
     assert len(predictions & expected) >= 2
 
 with ez.test("Llama3 chained generation"):
+
     chat = cp.deepcopy(prompts[0])
     response = not None
-    i = 1
     while response is not None:
-        if i == 2:
-            ...
-        i += 1
         prompt = model.template_tokenizer.tokenize(chat)
         print(f'Prompt len {len(prompt)}'.center(70, '.'))
         print('|'.join(prompt.tokens()))

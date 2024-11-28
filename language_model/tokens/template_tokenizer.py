@@ -105,6 +105,7 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
                         for special_symbol, replacement in self.tokenizer.slot_affix_replacements.items():
                             slot.prefix = slot.prefix.replace(f'{{{special_symbol}}}', replacement)
                             slot.suffix = slot.suffix.replace(f'{{{special_symbol}}}', replacement)
+                            slot.trunc_text = slot.trunc_text.replace(f'{{{special_symbol}}}', replacement)
                     slots.append(slot)
                     previous_end = end
             template_suffix = template_text[previous_end:]
@@ -117,9 +118,9 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
                 slot.token_index = len(template_tokens)
                 slot.slot_index = i
                 slot.template = template
-                slot_trunc_text = TokenSequence(slot.trunc_text,
-                    is_attended=template.is_attended, is_label=slot.is_label, tokenizer=self.tokenizer)
-                self.slot_trunc_text_tokens[(template_name, slot.name)] = slot_trunc_text
+                slot_trunc_tokens = TokenSequence(slot.trunc_text,
+                    is_attended=template.is_attended, is_label=False, tokenizer=self.tokenizer)
+                self.slot_trunc_text_tokens[(template_name, slot.name)] = slot_trunc_tokens
                 if isinstance(slot.max, float):
                     assert slot.max > slot.min + len(slot.trunc_text), \
                         f"Slot {slot.name} has a max value length {slot.max} shorter than the sum of its min value length {slot.min} (plus length of truncation_text tokens - {repr(slot.trunc_text)})."

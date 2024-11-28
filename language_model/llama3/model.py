@@ -37,7 +37,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             "The base model repository ID must be a string."
         with ez.shush:
             model, _ = us.FastLanguageModel.from_pretrained(self.model_base,
-                local_files_only=self.load_locally_saved_models_only)
+                local_files_only=self.load_locally_saved_models_only,
+                load_in_4bit='nf4' == self.quantization)
         del _
         self.model: hf.LlamaForCausalLM = model
 
@@ -104,16 +105,11 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 data_item_indices, response_batch, gen_slot_infos, data_batch
             ):
                 response_tokens = response_tokens[input_length:]
-                _, gen_slot, _ = gen_slot_info
-                trunc_text_suffix = gen_slot.trunc_text
                 if eos_token_id is not None:
                     eos_token_indices = (response_tokens == eos_token_id).nonzero() # noqa
                     if eos_token_indices.numel():
                         response_tokens = response_tokens[:eos_token_indices[0].item()]
-                        trunc_text_suffix = ''
                 response_text = self.template_tokenizer.tokenizer.decode(response_tokens)
-                if trunc_text_suffix:
-                    response_text += trunc_text_suffix
                 response_queue[data_item_index] = response_text
                 segment_index, slot, _ = gen_slot_info
                 setattr(data_item[segment_index], slot.name, response_text)

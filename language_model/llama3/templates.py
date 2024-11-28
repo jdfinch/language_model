@@ -22,7 +22,7 @@ class User(tok.Template):
 class Assistant(tok.Template):
     """An assistant turn in an instruction chat."""
     template = "<|start_header_id|>assistant<|end_header_id|>\n\n<content>"
-    content: tok.Slot = tok.Output(trunc_side='R', trunc_rank=1, trunc_text='...')
+    content: tok.Slot = tok.Output(trunc_side='R', trunc_rank=1)
 
 
 @dc.dataclass

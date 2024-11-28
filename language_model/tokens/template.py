@@ -70,7 +70,7 @@ class OutputSlot(TokenSlot):
     trunc: bool = True
     trunc_side: str = 'R'
     trunc_rank: float = 0.0
-    trunc_text: str = ''
+    trunc_text: str = '...{eos}'
     prefix: str = ''
     suffix: str = '{eos}'
 
@@ -82,7 +82,7 @@ def Output(
     trunc: bool = True,
     trunc_side: str = 'R',
     trunc_rank: float = 0.0,
-    trunc_text: str = '',
+    trunc_text: str = '...{eos}',
     prefix: str = '',
     suffix: str = '{eos}',
 ) -> str|OutputSlot:
