@@ -11,33 +11,13 @@ from language_model.tokens.tokenizer import Tokenizer
 from language_model.tokens.token_sequence import TokenSequence
 from language_model.tokens.token_sequences import TokenSequences
 from language_model.tokens.template import (
-    Slot, Input, Output, TokenSlot, OutputSlot, Template, SegmentTemplate)
+    Slot, Input, Output, TokenSlot, OutputSlot, Template, SegmentTemplate, Templates)
 
 import typing as T
 
 default: T.Any = object()
 
 def fields(cls_or_instance) -> list[dc.Field]: return dc.fields(cls_or_instance) # noqa
-
-
-@dc.dataclass
-class Templates(ez.MultiConfig[SegmentTemplate]):
-    def __post_init__(self):
-        super().__post_init__()
-        for name, template in self:
-            if isinstance(template, type) and issubclass(template, Template):
-                is_configured = name in self.configured
-                template = template()
-                segment_template = SegmentTemplate(template=template)
-                segment_template.configured.set('template', template, configured=is_configured)
-                setattr(self, name, segment_template)
-                self.configured.set(name, segment_template, configured=is_configured)
-            elif isinstance(template, Template):
-                is_configured = name in self.configured
-                segment_template = SegmentTemplate(template=template)
-                segment_template.configured.set('template', template, configured=is_configured)
-                setattr(self, name, segment_template)
-                self.configured.set(name, segment_template, configured=is_configured)
 
 
 @dc.dataclass
@@ -161,7 +141,6 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
                     else:
                         num_expected_out_tokens = min(self.max_out, slot_for_generation.max)
                     return i, self.template_slots[temp][j], num_expected_out_tokens
-
 
 
     def _tokenize_sequence(self,

@@ -187,6 +187,26 @@ class SegmentTemplate(ez.Config):
             "SegmentTemplate must have a name attribute, either as a string or from the template class name."
 
 
+@dc.dataclass
+class Templates(ez.MultiConfig[SegmentTemplate]):
+    def __post_init__(self):
+        super().__post_init__()
+        for name, template in self:
+            if isinstance(template, type) and issubclass(template, Template):
+                is_configured = name in self.configured
+                template = template()
+                segment_template = SegmentTemplate(template=template)
+                segment_template.configured.set('template', template, configured=is_configured)
+                setattr(self, name, segment_template)
+                self.configured.set(name, segment_template, configured=is_configured)
+            elif isinstance(template, Template):
+                is_configured = name in self.configured
+                segment_template = SegmentTemplate(template=template)
+                segment_template.configured.set('template', template, configured=is_configured)
+                setattr(self, name, segment_template)
+                self.configured.set(name, segment_template, configured=is_configured)
+
+
 if __name__ == '__main__':
 
     @dc.dataclass

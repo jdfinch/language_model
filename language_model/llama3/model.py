@@ -112,7 +112,11 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 response_text = self.template_tokenizer.tokenizer.decode(response_tokens)
                 response_queue[data_item_index] = response_text
                 segment_index, slot, _ = gen_slot_info
-                setattr(data_item[segment_index], slot.name, response_text)
+                segment = data_item[segment_index]
+                if isinstance(segment, dict):
+                    segment[slot.name] = response_text
+                else:
+                    setattr(segment, slot.name, response_text)
                 while waiting_for_response_index in response_queue:
                     response = response_queue.pop(waiting_for_response_index)
                     yield response

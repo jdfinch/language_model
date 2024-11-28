@@ -3,18 +3,18 @@ import ezpyzy as ez
 import json
 import pathlib as pl
 import copy as cp
+import textwrap as tw
 
 import language_model.llama3 as llama
 import language_model.tokens as tok
 from language_model.generate import Greedy
 
 
-with ez.test("Construct Llama 3"):
+with ez.test("Construct Llama3"):
     model = llama.Llama3(
-        model_base='unsloth/Llama-3.2-3B-Instruct',
-        quantization=None,
         template_tokenizer=llama.Llama3TemplateTokenizer(max_length=128, max_out=64),
-        generation=Greedy(batch_size=3))
+        generation=Greedy(),
+    )
 
 with ez.test("Create data"):
     captial_langs = json.loads(pl.Path('test/capital_langs.json').read_text())
@@ -31,36 +31,59 @@ with ez.test("Create data"):
         ]
         prompts.append(prompt)
 
-with ez.test("Llama 3 generation"):
+with ez.test("Generation"):
     predictions: set[str] = set()
     for prompt in cp.deepcopy(prompts[:5]):
         response, = model.generate(prompt)
-        print(prompt[1].content, '->')
-        print(response, '\n')
+        # print(prompt[1].content, '->')
+        # print(response, '\n')
         for word in response.split(' '):
             predictions.add(''.join(c.lower() for c in word if c.isalpha()))
-    expected = set("pashto, dari, albanian, arabic, berber, catalan, portuguese".split(', '))
-    print(f"expected: {', '.join(expected)}")
+    expected = set("pashto, dari, albanian, arabic, berber, catalan, spanish, portuguese".split(', '))
+    # print(f"expected: {', '.join(expected)}")
     assert len(predictions & expected) >= 2
 
 with ez.test("Llama 3 generation (batched)"):
+    model.generation.batch_size = 4
     predictions: set[str] = set()
     responses = model.generate(cp.deepcopy(prompts[:5]))
     for prompt, response in zip(prompts[:5], responses):
-        print(prompt[1].content, '->')
-        print(response, '\n')
+        # print(prompt[1].content, '->')
+        # print(response, '\n')
         for word in response.split(' '):
             predictions.add(''.join(c.lower() for c in word if c.isalpha()))
-    print(f"expected: {', '.join(expected)}")
+    # print(f"expected: {', '.join(expected)}")
     assert len(predictions & expected) >= 2
 
-with ez.test("Llama3 chained generation"):
+with ez.test("Greedy generation determinism"):
+    responses = set()
+    for i in range(3):
+        prompt = cp.deepcopy(prompts[0])
+        response, = model.generate(prompt)
+        responses.add(response)
+    assert len(responses) == 1
 
+with ez.test("Chained generation"):
     chat = cp.deepcopy(prompts[0])
     response = not None
     while response is not None:
         prompt = model.template_tokenizer.tokenize(chat)
-        print(f'Prompt len {len(prompt)}'.center(70, '.'))
-        print('|'.join(prompt.tokens()))
+        # print('|'.join(prompt.tokens()))
         response ,= model.generate(chat)
-        print(f'GENERATED: {response}', '\n\n')
+    assistant_turns = [segment for segment in chat if isinstance(segment, llama.Assistant)]
+    assert assistant_turns[0].content == tw.dedent('''
+        Kabul, the capital city of Afghanistan, is home to over 20 ethnic groups and more than 50 different languages. The official language of Afghanistan is Pashto (also known as Dari), which is widely spoken throughout the country.
+    
+        However, there are several other languages that are also commonly used in Kabul
+    ''').strip()
+    assert assistant_turns[1].content == tw.dedent('''
+        I'd be happy to provide information on Kabul's rich history and cultural heritage.
+
+        **History**
+        
+        Kabul has been an important center for trade, commerce, and politics throughout its history. The city was founded by Alexander the Great around 330 BCE, but it wasn't until the 8th century CE that Kabul
+    ''').strip()
+    assert assistant_turns[2].content == tw.dedent('''
+        We haven't discussed anything yet, so there is nothing for me to summarize! This conversation just started with your request to give a "long" answer, but I didn't have any prior statements or topics to cover. Let's start fresh if you'd like - what would you like to talk about?
+    ''').strip()
+
