@@ -66,13 +66,13 @@ class Adafactor(Optimizer):
 
 
 @dc.dataclass
-class AdamW(Optimizer):
-    learning_rate: float = 1e-4
+class Adam(Optimizer):
+    learning_rate: float = 1e-2
     betas: tuple[float, float] = (0.9, 0.999)
     """The beta values are the decay rates of the first and second-order moment of the optimizer."""
     eps: float = 1e-8
     """The epsilon value prevents division by zero in the optimizer."""
-    weight_decay: float = 1e-2
+    weight_decay: float = 0.0
     """The weight decay value for the optimizer."""
     quantization: str|None = None
     """The quantization scheme to use for the optimizer, either None or '8bit'."""

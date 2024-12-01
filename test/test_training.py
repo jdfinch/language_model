@@ -18,7 +18,7 @@ with ez.test("Construct Llama3"):
         training=tr.Training(
             epochs=10,
             batch_size=1,
-            optimizer=opt.AdamW(learning_rate=1e-4, quantization='8bit'),
+            optimizer=opt.Adam(learning_rate=1e-4, quantization='8bit'),
             scheduler=sch.LinearWarmupSchedule(num_warmup_steps=0)
         ),
         template_tokenizer=llama.Llama3TemplateTokenizer(max_length=128, max_out=16)

@@ -29,7 +29,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """The hardware device to use for training and/or generation, such as 'cuda', 'cuda:7', or 'cpu'."""
     template_tokenizer: tok.TemplateTokenizer = None
     """A Config for the tokenizer and templates to use to format sequences passed to the model."""
-    adapters: lora.AdaptersConfig|None = lora.AdaptersConfig(primary=lora.LoRA())
+    adapters: lora.LoRAs|None = lora.LoRAs()
     """The LoRA adapters to use for the model (set to None for full fine-tuning)."""
     training: tr.Training|None = tr.Training()
     """Hyperparameters and configuration for training the model."""

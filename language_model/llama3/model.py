@@ -11,8 +11,10 @@ import math
 from language_model.tokens.template import Template
 from language_model.tokens.token_sequences import TokenSequence, TokenSequences
 from language_model.language_model_config import LanguageModelConfig
+from language_model.lora import LoRA, LoRAs
 
 import transformers as hf
+import peft
 import torch as pt
 
 import language_model.llama3.templates as lt
@@ -37,26 +39,65 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
 
     def __post_init__(self):
         super().__post_init__()
+        self.reload_model()
+
+    def reload_model(self):
+        if self.model_base is None and self.adapters.active and isinstance(self.adapters.active_adapter.repo_id, str):
+            self.model_base = self.adapters.active_adapter.repo_id
         assert isinstance(self.model_base, str), \
             "The base model repository ID must be a string."
-        if self.unsloth is not False and (
-             self.training is None or self.quantization not in (None, 'bf16') or self.adapters
+        if self.unsloth is not False and self.device != 'cpu' and self.adapters.number <= 1 and (
+             self.training is None or self.quantization not in (None, 'bf16') or self.adapters.number == 1
         ):
+            self.unsloth = True
             with ez.shush: import unsloth
             self._unsloth = unsloth
             AutoModelForCausalLM = (lambda *args, **kwargs:
                 self._unsloth.FastLanguageModel.from_pretrained(*args, **kwargs)[0])
-            self.unsloth = True
         else:
             self.unsloth = False
+            attn = dict(attn_implementation='flash_attention_2') if self.device != 'cpu' else {}
             AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
-                attn_implementation='flash_attention_2', torch_dtype=pt.bfloat16)
+                **attn, torch_dtype=pt.bfloat16)
         with ez.shush: model = AutoModelForCausalLM(self.model_base, # noqa
             local_files_only=self.load_locally_saved_models_only,
             load_in_4bit='nf4' == self.quantization,
             load_in_8bit='int8' == self.quantization,
             device_map={'': self.device})
         self.model: hf.LlamaForCausalLM = model # noqa
+        if not self.unsloth:
+            for name, adapter in self.adapters:
+                if isinstance(adapter, LoRA):
+                    if adapter.trained:
+                        self.model.load_adapter(adapter.repo_id, adapter_name=name, device_map=self.device)
+                        if adapter.lora_merge_on_load:
+                            self.activate_adapter(name)
+                            self.merge_adapter()
+                            self.activate_adapter(None)
+            self.activate_adapter(self.adapters.active)
+
+    def activate_adapter(self, name: str | None):
+        assert not self.unsloth
+        self.adapters.active = name
+        if self.adapters.active and self.adapters.active_adapter.trained:
+            self.model.set_adapter(name)
+        else:
+            try: self.model.disable_adapters()
+            except ValueError: pass
+
+    def deactivate_adapter(self):
+        assert not self.unsloth
+        self.activate_adapter(None)
+
+    def merge_adapter(self):
+        assert not self.unsloth
+        raise NotImplementedError
+
+    def unmerge_adapter(self):
+        assert not self.unsloth
+        assert getattr(self.adapters, self.adapters.active).repo_id is not None, \
+            f"Unmerging adapter {self.adapters.active} requires re-loading the adapter and the base model separately, but the this active adapter does not have a repo_id field. Save the adapter to disk before calling unmerge_adapter() so it can be re-loaded from its repo_id path."
+        raise NotImplementedError
 
     def generate(self,
         data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
@@ -90,7 +131,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 eos_token_id = self.template_tokenizer.template_slots_eos[
                     gen_slot.template.name, gen_slot.slot_index]
                 prompt_tokens = self.template_tokenizer._tokenize_sequence(data_item, gen_slot_info)
-                max_out = min(self.template_tokenizer.max_length - len(prompt_tokens), n_expected_out)
+                max_out = self.template_tokenizer.max_length - len(prompt_tokens)
+                if n_expected_out is not None and n_expected_out < max_out: max_out = n_expected_out
                 generation_group_key = (max_out, eos_token_id)
                 generation_group = generation_groups.setdefault(generation_group_key, [])
                 generation_group.append((i, data_item, gen_slot_info, prompt_tokens))
@@ -145,6 +187,18 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
 
     def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         if self.unsloth: self._unsloth.FastLanguageModel.for_training(self.model)
+        if self.adapters.active and not self.adapters.active_adapter.trained:
+            if self.unsloth:
+                pc = self.adapters.active_adapter.get_peft_config()
+                self.model = self._unsloth.FastLanguageModel.get_peft_model(self.model,
+                    r=pc.r, target_modules=pc.target_modules, lora_alpha=pc.lora_alpha,
+                    lora_dropout=pc.lora_dropout, bias=pc.bias, layers_to_transform=pc.layers_to_transform,
+                    layers_pattern=pc.layers_pattern, use_rslora=pc.use_rslora,
+                    modules_to_save=pc.modules_to_save, init_lora_weights=pc.init_lora_weights,
+                    loftq_config=pc.loftq_config)
+            else:
+                self.model.add_adapter(self.adapters.active_adapter.get_peft_config(), self.adapters.active)
+            self.adapters.active_adapter.trained = True
         self.model.train()
         if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
             self.training.optimizer.optimize(self.model)

@@ -133,7 +133,7 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
                     temp = segment['temp'] if isinstance(segment, dict) else type(segment).__name__
                     slot_for_generation = self.template_slots[temp][j]
                     if self.max_out is None and slot_for_generation.max is None:
-                        num_expected_out_tokens = 0
+                        num_expected_out_tokens = None
                     elif self.max_out is None:
                         num_expected_out_tokens = slot_for_generation.max
                     elif slot_for_generation.max is None:
@@ -262,7 +262,7 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
         _slot_trunc_cands_min, _slot_trunc_cands_max = 2, 3
 
         # calculate current total length if we truncated and merged all segments as-is
-        current_len = (num_expected_out_tokens
+        current_len = ((num_expected_out_tokens or 0)
                        + len(self.sequence_prefix_tokens)
                        + (len(self.sequence_suffix_tokens) if slot_for_generation is None else 0)
                        + sum(max_tokens for _, _, _, max_tokens in slot_value_table.values())

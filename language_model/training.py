@@ -12,7 +12,7 @@ import language_model.optimizer as opt
 class Training(ez.Config):
     epochs: int | float = 1
     """The number of epochs to train for. If a float, the model will train for that fraction of the dataset."""
-    optimizer: opt.Optimizer = opt.AdamW()
+    optimizer: opt.Optimizer = opt.Adam()
     """The optimizer to use for training, which determines the optimization algorithm, learning rate, weight decay, etc."""
     scheduler: sch.Scheduler = sch.LinearWarmupSchedule()
     """The learning rate algorithm to use for training, which determines how the learning rate changes over time."""

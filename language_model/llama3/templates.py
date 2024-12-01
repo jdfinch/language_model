@@ -45,6 +45,7 @@ class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3Temp
     templates: Llama3Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
         repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    max_length: int = 256
 
 if __name__ == '__main__':
     config = Llama3TemplateTokenizerConfig()
