@@ -10,7 +10,7 @@ from language_model.tokens import TemplateTokenizer
 class System(tok.Template):
     """General instructions that condition how Llama3 should respond to specific instructions."""
     template = "<|start_header_id|>system<|end_header_id|>\n\n<content><|eot_id|>"
-    content: tok.Slot = tok.Input(trunc_side='R', trunc_rank=0)
+    content: tok.Slot = tok.Input(trunc_side='R', trunc_rank=-1)
 
 @dc.dataclass
 class User(tok.Template):
@@ -30,9 +30,9 @@ class Llama3Templates(tok.Templates):
     system: tok.SegmentTemplate|System = tok.SegmentTemplate(
         template=System(), trunc_segment=False)
     user: tok.SegmentTemplate|User = tok.SegmentTemplate(
-        template=User(), trunc_segment=True, trunc_segment_rank=1)
+        template=User(), trunc_segment=True, trunc_segment_rank=0)
     assistant: tok.SegmentTemplate|Assistant = tok.SegmentTemplate(
-        template=Assistant(), trunc_segment=True, trunc_segment_rank=1)
+        template=Assistant(), trunc_segment=True, trunc_segment_rank=0)
 
 @dc.dataclass
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):

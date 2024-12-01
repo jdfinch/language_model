@@ -20,6 +20,8 @@ class LoRA(ez.ImmutableConfig):
 
 
 @dc.dataclass
-class Adapters(ez.MultiConfig[LoRA]):
+class AdaptersConfig(ez.MultiConfig[LoRA]):
     primary: LoRA = LoRA()
+
+
 

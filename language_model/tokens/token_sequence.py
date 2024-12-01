@@ -54,7 +54,8 @@ class TokenSequence:
             return dict(
                 input_ids=seq_type([self.token_ids]),
                 attention_mask=seq_type([self.is_attendeds]),
-                labels=seq_type([self.is_labels]),)
+                labels=seq_type([[t if il else -100
+                    for t, il in zip(self.token_ids, self.is_labels)]]))
         else:
             return dict(
                 input_ids=seq_type([self.token_ids]),

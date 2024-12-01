@@ -1,0 +1,19 @@
+--find-links https://download.pytorch.org/whl/torch_stable.html
+--find-links https://download.pytorch.org/whl/cu118
+
+# Python dependencies
+torch==2.3.0+cu118
+torchvision
+torchaudio
+
+# General dependencies
+wheel
+packaging
+
+# Unsloth (from GitHub)
+unsloth[huggingface] @ git+https://github.com/unslothai/unsloth.git
+
+# Additional dependencies
+bitsandbytes
+xformers
+triton==2.3.0

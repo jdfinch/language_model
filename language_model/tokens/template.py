@@ -109,7 +109,7 @@ class TemplateMeta(type):
                 f"Template class {name} must define a template string."
             for attr, value in dct.items():
                 if isinstance(value, TokenSlot):
-                    dct[attr] = TokenSlot(value, name=attr)
+                    value.name = attr
             def get_template_str(tmp):
                 if isinstance(tmp, Template):
                     tmp_text = tmp.template
@@ -123,15 +123,18 @@ class TemplateMeta(type):
                     return tmp
             template = get_template_str(dct['template'])
             dct['template'] = template
+            dct['__template_slots__'] = {}
             for attr, value in dct.items():
                 if isinstance(value, TokenSlot):
                     assert f"<{attr}>" in template, \
                         f"Slot <{attr}> was defined as a class field of {name} but not in template text:  {template}"
-                    dct[attr] = dc.field(default_factory=ft.partial(cp.copy, value))
+                    dct[attr] = dc.field(default_factory=ft.partial(cp.deepcopy, value))
+                    dct['__template_slots__'][value.name] = value
         return super().__new__(cls, name, bases, dct)
 
 class Template(metaclass=TemplateMeta):
     template: str | Template = None
+    __template_slots__: dict[str, TokenSlot]
 
     def __str__(self):
         template = self.template

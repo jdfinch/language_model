@@ -12,10 +12,10 @@ import language_model.optimizer as opt
 class Training(ez.Config):
     epochs: int | float = 1
     """The number of epochs to train for. If a float, the model will train for that fraction of the dataset."""
-    optimizer: opt.Optimizer = opt.Adafactor()
+    optimizer: opt.Optimizer = opt.AdamW()
     """The optimizer to use for training, which determines the optimization algorithm, learning rate, weight decay, etc."""
     scheduler: sch.Scheduler = sch.LinearWarmupSchedule()
-    """The learning rate scheduler to use for training, which determines how the learning rate changes over time."""
+    """The learning rate algorithm to use for training, which determines how the learning rate changes over time."""
     batch_size: int = 16
     """The effective batch size to use for training. Divide by gradient_accumulation_steps to get the actual batch size used on the hardware."""
     physical_batch_size: int = 1
@@ -26,8 +26,8 @@ class Training(ez.Config):
     """Whether to use gradient checkpointing to reduce memory usage. Does not affect training performance."""
     shuffle_data: bool = True
     """Whether to shuffle data samples before each training epoch."""
-    resume_from_checkpoint: bool = False
-    """Whether to resume training from the last checkpoint, including loading the optimizer and scheduler states."""
+    resume_previous_training: bool = False
+    """Whether to resume training, loading/keeping the optimizer and scheduler states from previous training runs."""
 
     def __post_init__(self):
         super().__post_init__()

@@ -80,7 +80,8 @@ class TokenSequences:
             return dict(
                 input_ids=seq_type([seq.token_ids for seq in self.sequences]),
                 attention_mask=seq_type([seq.is_attendeds for seq in self.sequences]),
-                labels=seq_type([seq.is_labels for seq in self.sequences]),)
+                labels=seq_type([[t if il else -100 for t, il in zip(seq.token_ids, seq.is_labels)]
+                    for seq in self.sequences]),)
         else:
             return dict(
                 input_ids=seq_type([seq.token_ids for seq in self.sequences]),

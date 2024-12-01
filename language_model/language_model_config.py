@@ -1,9 +1,8 @@
 
-
-
 import ezpyzy as ez
 import dataclasses as dc
 import pathlib as pl
+import random as rng
 
 import transformers as hf
 
@@ -30,12 +29,14 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """The hardware device to use for training and/or generation, such as 'cuda', 'cuda:7', or 'cpu'."""
     template_tokenizer: tok.TemplateTokenizer = None
     """A Config for the tokenizer and templates to use to format sequences passed to the model."""
-    adapters: lora.Adapters|None = lora.Adapters(primary=lora.LoRA())
+    adapters: lora.AdaptersConfig|None = lora.AdaptersConfig(primary=lora.LoRA())
     """The LoRA adapters to use for the model (set to None for full fine-tuning)."""
     training: tr.Training|None = tr.Training()
     """Hyperparameters and configuration for training the model."""
     generation: gen.Generate = gen.Greedy()
     """Hyperparameters and configuration for generating text from the model."""
+    random_seed: int|None = None
+    """Seed for calls to random number generation, such as shuffling training data."""
 
 
     def __post_init__(self):
@@ -48,3 +49,4 @@ class LanguageModelConfig(ez.ImmutableConfig):
                 self.base = str(config_path)
         # Load the Config
         super().__post_init__()
+        self.rng = rng.Random(self.random_seed)

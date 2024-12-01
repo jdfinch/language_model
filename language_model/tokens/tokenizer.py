@@ -5,6 +5,9 @@ import dataclasses as dc
 import sys
 import ezpyzy as ez
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 @dc.dataclass
 class Tokenizer(ez.Config):
