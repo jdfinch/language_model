@@ -9,7 +9,6 @@ import language_model.llama3 as llama
 import language_model.training as tr
 import language_model.optimizer as opt
 import language_model.scheduler as sch
-import language_model.tokens as tok
 
 
 with ez.test("Construct Llama3"):
@@ -18,7 +17,7 @@ with ez.test("Construct Llama3"):
         training=tr.Training(
             epochs=10,
             batch_size=1,
-            optimizer=opt.Adam(learning_rate=1e-4, quantization='8bit'),
+            optimizer=opt.Adam(learning_rate=1e-2, quantization='8bit'),
             scheduler=sch.LinearWarmupSchedule(num_warmup_steps=0)
         ),
         template_tokenizer=llama.Llama3TemplateTokenizer(max_length=128, max_out=16)
@@ -64,7 +63,3 @@ with ez.test("Full finetuning each step"):
         print()
     print(f"Training took {pt.cuda.max_memory_allocated() / 1e9:.3f} GB")
 
-
-
-    for epoch, ppl in enumerate(model.train_each_epoch(data)):
-        ...

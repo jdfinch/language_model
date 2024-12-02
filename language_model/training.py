@@ -28,6 +28,10 @@ class Training(ez.Config):
     """Whether to shuffle data samples before each training epoch."""
     resume_previous_training: bool = False
     """Whether to resume training, loading/keeping the optimizer and scheduler states from previous training runs."""
+    current_epoch: int = 0
+    """The epoch of current training (mostly used for resuming training)"""
+    current_step: int = 0
+    """The current step of training the current epoch (mostly used for resuming training)"""
 
     def __post_init__(self):
         super().__post_init__()

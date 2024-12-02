@@ -5,6 +5,7 @@ import dataclasses as dc
 import functools as ft
 import itertools as it
 import json
+import gc
 import pathlib as pl
 import math
 
@@ -26,7 +27,6 @@ import typing as T
 class Llama3Config(LanguageModelConfig):
     model_base: str = "meta-llama/Llama-3.2-1B-Instruct"
     template_tokenizer: lt.Llama3TemplateTokenizerConfig = lt.Llama3TemplateTokenizerConfig()
-    unsloth: bool = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -42,30 +42,18 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         self.reload_model()
 
     def reload_model(self):
-        if self.model_base is None and self.adapters.active and isinstance(self.adapters.active_adapter.repo_id, str):
-            self.model_base = self.adapters.active_adapter.repo_id
         assert isinstance(self.model_base, str), \
             "The base model repository ID must be a string."
-        if self.unsloth is not False and self.device != 'cpu' and self.adapters.number <= 1 and (
-             self.training is None or self.quantization not in (None, 'bf16') or self.adapters.number == 1
-        ):
-            self.unsloth = True
-            with ez.shush: import unsloth
-            self._unsloth = unsloth
-            AutoModelForCausalLM = (lambda *args, **kwargs:
-                self._unsloth.FastLanguageModel.from_pretrained(*args, **kwargs)[0])
-        else:
-            self.unsloth = False
-            attn = dict(attn_implementation='flash_attention_2') if self.device != 'cpu' else {}
-            AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
-                **attn, torch_dtype=pt.bfloat16)
+        attn = dict(attn_implementation='flash_attention_2') if self.device != 'cpu' else {}
+        AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
+            **attn, torch_dtype=pt.bfloat16)
         with ez.shush: model = AutoModelForCausalLM(self.model_base, # noqa
             local_files_only=self.load_locally_saved_models_only,
             load_in_4bit='nf4' == self.quantization,
             load_in_8bit='int8' == self.quantization,
             device_map={'': self.device})
         self.model: hf.LlamaForCausalLM = model # noqa
-        if not self.unsloth:
+        if self.adapters:
             for name, adapter in self.adapters:
                 if isinstance(adapter, LoRA):
                     if adapter.trained:
@@ -76,8 +64,28 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                             self.activate_adapter(None)
             self.activate_adapter(self.adapters.active)
 
+    def delete(self):
+        self.model = None
+        if self.training:
+            self.training.optimizer.optimizer = None
+            self.training.scheduler.scheduler = None
+        gc.collect()
+        pt.cuda.empty_cache()
+
+    def save(self, path):
+        path_str = path
+        path = pl.Path(path).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        if self.adapters and self.adapters.active:
+            self.adapters.active_adapter.repo_id = str(path_str)
+        self.configured.save(path/'language_model_config.json')
+        with ez.shush: self.model.save_pretrained(path)
+        if self.training and self.training.optimizer.optimizer:
+            pt.save(self.training.optimizer.optimizer.state_dict(), path/'optimizer.pt')
+        if self.training and self.training.scheduler.scheduler:
+            pt.save(self.training.scheduler.scheduler.state_dict(), path/'scheduler.pt')
+
     def activate_adapter(self, name: str | None):
-        assert not self.unsloth
         self.adapters.active = name
         if self.adapters.active and self.adapters.active_adapter.trained:
             self.model.set_adapter(name)
@@ -86,15 +94,12 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             except ValueError: pass
 
     def deactivate_adapter(self):
-        assert not self.unsloth
         self.activate_adapter(None)
 
     def merge_adapter(self):
-        assert not self.unsloth
         raise NotImplementedError
 
     def unmerge_adapter(self):
-        assert not self.unsloth
         assert getattr(self.adapters, self.adapters.active).repo_id is not None, \
             f"Unmerging adapter {self.adapters.active} requires re-loading the adapter and the base model separately, but the this active adapter does not have a repo_id field. Save the adapter to disk before calling unmerge_adapter() so it can be re-loaded from its repo_id path."
         raise NotImplementedError
@@ -107,7 +112,6 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
     def each_generation(self,
         data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
     ) -> T.Iterable[str|None]:
-        if self.unsloth: self._unsloth.FastLanguageModel.for_inference(self.model)
         self.model.eval()
         generation_config = self.generation.construct_hf_config()
         generation_config.pad_token_id = self.template_tokenizer.tokenizer.pad_token_id
@@ -185,31 +189,42 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             yield response
             waiting_for_response_index += 1
 
-    def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        if self.unsloth: self._unsloth.FastLanguageModel.for_training(self.model)
+    def start_training(self):
         if self.adapters.active and not self.adapters.active_adapter.trained:
-            if self.unsloth:
-                pc = self.adapters.active_adapter.get_peft_config()
-                self.model = self._unsloth.FastLanguageModel.get_peft_model(self.model,
-                    r=pc.r, target_modules=pc.target_modules, lora_alpha=pc.lora_alpha,
-                    lora_dropout=pc.lora_dropout, bias=pc.bias, layers_to_transform=pc.layers_to_transform,
-                    layers_pattern=pc.layers_pattern, use_rslora=pc.use_rslora,
-                    modules_to_save=pc.modules_to_save, init_lora_weights=pc.init_lora_weights,
-                    loftq_config=pc.loftq_config)
-            else:
-                self.model.add_adapter(self.adapters.active_adapter.get_peft_config(), self.adapters.active)
+            self.model.add_adapter(self.adapters.active_adapter.get_peft_config(), self.adapters.active)
             self.adapters.active_adapter.trained = True
         self.model.train()
         if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
-            self.training.optimizer.optimize(self.model)
-            self.training.scheduler.schedule(self.training.optimizer)
-        for epoch in range(self.training.epochs):
+            if self.training.optimizer.optimizer is None         and self.loaded_model_path:
+                self.training.optimizer.optimize(self.model)
+                self.training.scheduler.schedule(self.training.optimizer)
+                if self.training.resume_previous_training:
+                    path = pl.Path(self.loaded_model_path).expanduser()
+                    if (optpath:=(path/'optimizer.pt')).exists():
+                        self.training.optimizer.optimizer.load_state_dict(pt.load(optpath)) # noqa
+                    if (schpath:=(path/'scheduler.pt')).exists():
+                        self.training.scheduler.scheduler.load_state_dict(pt.load(schpath))
+            else:
+                self.training.optimizer.optimize(self.model)
+                self.training.scheduler.schedule(self.training.optimizer)
+        if not self.training.resume_previous_training:
+            self.training.current_epoch = 0
+            self.training.current_step = 0
+        return self.training.optimizer.optimizer, self.training.scheduler.scheduler
+
+    def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
+        self.start_training()
+        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
             samples_trained = 0
             nlls, nums_tokens = [], []
             if self.training.shuffle_data:
                 data = list(data)
                 self.rng.shuffle(data)
-            for physical_step, batch in enumerate(ez.batching(data, size=self.training.physical_batch_size)):
+            batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
+            item_ff = 0
+            while item_ff // self.training.batch_size < self.training.current_step:
+                item_ff += len(next(batch_iter))
+            for physical_step, batch in enumerate(batch_iter):
                 tokens = self.template_tokenizer.tokenize(batch).dict(
                     with_labels=True,
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
@@ -223,25 +238,26 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     self.training.optimizer.optimizer.step()
                     self.training.scheduler.scheduler.step()
                     self.training.optimizer.optimizer.zero_grad()
+                    self.training.current_step += 1
                 samples_trained += len(batch)
             epoch_nll, epoch_n_tokens = sum(nll * n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
             ppl = math.exp(epoch_nll / epoch_n_tokens)
+            self.training.current_step = 0
             yield ppl
 
-
     def train_each_step(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        if self.unsloth: self._unsloth.FastLanguageModel.for_training(self.model)
-        self.model.train()
-        if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
-            self.training.optimizer.optimize(self.model)
-            self.training.scheduler.schedule(self.training.optimizer)
-        for epoch in range(self.training.epochs):
+        self.start_training()
+        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
             samples_trained = 0
             nlls, nums_tokens = [], []
             if self.training.shuffle_data:
                 data = list(data)
                 self.rng.shuffle(data)
-            for physical_step, batch in enumerate(ez.batching(data, size=self.training.physical_batch_size)):
+            batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
+            item_ff = 0
+            while item_ff // self.training.batch_size < self.training.current_step:
+                item_ff += len(next(batch_iter))
+            for physical_step, batch in enumerate(batch_iter):
                 tokens = self.template_tokenizer.tokenize(batch).dict(
                     with_labels=True,
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
@@ -259,22 +275,24 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     ppl = math.exp(step_nll / step_n_tokens)
                     nlls, nums_tokens = [], []
                     yield ppl
+                    self.training.current_step += 1
                 samples_trained += len(batch)
+            self.training.current_step = 0
 
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        if self.unsloth: self._unsloth.FastLanguageModel.for_training(self.model)
-        self.model.train()
-        if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
-            self.training.optimizer.optimize(self.model)
-            self.training.scheduler.schedule(self.training.optimizer)
-        for epoch in range(self.training.epochs):
+        self.start_training()
+        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
             def train_epoch_each_step(data=data):
                 samples_trained = 0
                 nlls, nums_tokens = [], []
                 if self.training.shuffle_data:
                     data = list(data)
                     self.rng.shuffle(data)
-                for physical_step, batch in enumerate(ez.batching(data, size=self.training.physical_batch_size)):
+                batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
+                item_ff = 0
+                while item_ff // self.training.batch_size < self.training.current_step:
+                    item_ff += len(next(batch_iter))
+                for physical_step, batch in enumerate(batch_iter):
                     tokens = self.template_tokenizer.tokenize(batch).dict(with_labels=True,
                         seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                     num_tokens = tokens['input_ids'].ne(-100).sum().item()
@@ -291,8 +309,10 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                         ppl = math.exp(step_nll / step_n_tokens)
                         nlls, nums_tokens = [], []
                         yield ppl
+                        self.training.current_step += 1
                     samples_trained += len(batch)
             yield train_epoch_each_step(data=data)
+            self.training.current_step = 0
 
 
 

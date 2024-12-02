@@ -13,10 +13,10 @@ from language_model.scheduler import LinearWarmupSchedule
 with ez.test('Create LoRA model'):
     model = llama.Llama3(
         template_tokenizer=llama.Llama3TemplateTokenizer(max_out=32),
-        training=Training(epochs=10, scheduler=LinearWarmupSchedule(num_warmup_steps=0)),
-        generation=Greedy(batch_size=10)
+        training=Training(epochs=5, scheduler=LinearWarmupSchedule(num_warmup_steps=0)),
+        generation=Greedy(batch_size=10),
+        quantization=None
     )
-    print(f"{model.unsloth = }")
 
     data = json.loads(pl.Path('test/capital_langs.json').read_text())
     training_data = []
@@ -46,6 +46,7 @@ with ez.test('Create LoRA model'):
 
     print(f"Model size: {pt.cuda.max_memory_allocated() / 1e9:.2f} GB")
 
+
 with ez.test('Base model predictions', crash=True):
     base_predictions = predict()
     base_accuracy = evaluate(base_predictions)
@@ -58,7 +59,11 @@ with ez.test('Base model predictions', crash=True):
 with ez.test('LoRA training', crash=True):
     for epoch, ppl in enumerate(model.train_each_epoch(training_data)):
         print(f"Epoch {epoch} ppl {ppl:.3f}")
-
+        if epoch == 2:
+            early_predictions = predict()
+            early_accuracy = evaluate(early_predictions)
+            print(f"Early predictions got {100 * early_accuracy:.3f}")
+            model.save('ex/test/lorav2')
     print(f"LoRA training: {pt.cuda.max_memory_allocated() / 1e9:.2f} GB")
 
 
@@ -75,11 +80,41 @@ with (ez.test('Disable LoRA and repredict')):
         assert base_prediction == no_lora_prediction, \
             f"{base_prediction} != {no_lora_prediction} on prediction {i}"
 
+
 with (ez.test('Re-Enable LoRA and repredict')):
     model.activate_adapter('adapter')
     lora_repredictions = predict()
     for i, (lora_reprediction, no_lora_prediction) in enumerate(zip(lora_repredictions, no_lora_predictions)):
         assert lora_reprediction == no_lora_prediction, \
             f"{lora_reprediction} != {no_lora_prediction} on prediction {i}"
+
+
+with ez.test('Delete model'):
+    model.delete()
+    del model
+    gb_allocated = pt.cuda.memory_allocated() / 1e9
+    print(f"After deleting model: {gb_allocated:.2f} GB allocated")
+    assert gb_allocated < 0.1
+
+
+with ez.test('Load LoRA', crash=True):
+    model = llama.Llama3('ex/test/lorav2', training=Training(resume_previous_training=True))
+    disk_lora_predictions = predict()
+    disk_lora_accuracy = evaluate(disk_lora_predictions)
+    print(f"Loaded LoRA got {100 * disk_lora_accuracy:.3f}")
+    for original_prediction, loaded_prediction in zip(early_predictions, disk_lora_predictions):
+        assert original_prediction == loaded_prediction, \
+            f"{original_prediction} != {loaded_prediction}"
+
+
+with ez.test('Resume training', crash=True):
+    for i, ppl in enumerate(model.train_each_epoch(training_data)):
+        print(f'Resumed epoch {i} ppl: {ppl:.3f}')
+    resumed_lora_predictions = predict()
+    resumed_lora_accuracy = evaluate(resumed_lora_predictions)
+    print(f"Loaded LoRA got {100 * resumed_lora_accuracy:.3f}")
+    for original_prediction, loaded_prediction in zip(lora_predictions, resumed_lora_predictions):
+        assert original_prediction == loaded_prediction, \
+            f"{original_prediction} != {loaded_prediction}"
 
 

@@ -11,7 +11,7 @@ import language_model.tokens as tok
 from language_model.generate import Greedy
 
 
-with ez.test("Construct Llama3", crash=True):
+with ez.test("Construct Llama3"):
     model = llama.Llama3(
         model_base='meta-llama/Llama-3.2-1B-Instruct',
         quantization=None,
@@ -19,7 +19,6 @@ with ez.test("Construct Llama3", crash=True):
         generation=Greedy(),
         adapters=None,
     )
-    print('Sin of sloth' if not model.unsloth else 'Unsloth!')
 
 with ez.test("Create data"):
     captial_langs = json.loads(pl.Path('test/capital_langs.json').read_text())

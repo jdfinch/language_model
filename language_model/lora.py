@@ -1,8 +1,7 @@
 
 import ezpyzy as ez
-
+import pathlib as pl
 import dataclasses as dc
-
 import peft
 
 
@@ -28,7 +27,8 @@ class LoRA(ez.Config):
         if (self.repo_id is None and
             isinstance(self.base, str) and not self.base.lstrip().startswith('{')
         ):
-            self.repo_id = self.base
+            path = pl.Path(self.base)
+            self.repo_id = str(path.parent if path.expanduser().is_file() else path)
         super().__post_init__()
         if self.alpha is None:
             with self.configured.not_configuring():

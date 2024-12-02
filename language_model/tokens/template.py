@@ -175,9 +175,9 @@ class SegmentTemplate(ez.Config):
                         self.slots[slot_name] = OutputSlot(name=slot_name)
                     else:
                         self.slots[slot_name] = InputSlot(name=slot_name)
-        else:
+        elif hasattr(self.template, 'template'):
             template = self.template
-            self.template = template.template
+            self.template = template.template # noqa
             for slot_name, slot in vars(template).items():
                 if isinstance(slot, TokenSlot):
                     assert f"<{slot_name}>" in self.template, \
@@ -186,8 +186,6 @@ class SegmentTemplate(ez.Config):
                     self.slots[slot_name] = slot_copy
                     slot_copy.name = slot_name
             self.name = template.__class__.__name__
-        assert isinstance(self.name, str), \
-            "SegmentTemplate must have a name attribute, either as a string or from the template class name."
 
 
 @dc.dataclass
@@ -201,12 +199,16 @@ class Templates(ez.MultiConfig[SegmentTemplate]):
                 segment_template = SegmentTemplate(template=template)
                 segment_template.configured.set('template', template, configured=is_configured)
                 setattr(self, name, segment_template)
+                if segment_template.name is None:
+                    segment_template.name = name
                 self.configured.set(name, segment_template, configured=is_configured)
             elif isinstance(template, Template):
                 is_configured = name in self.configured
                 segment_template = SegmentTemplate(template=template)
                 segment_template.configured.set('template', template, configured=is_configured)
                 setattr(self, name, segment_template)
+                if segment_template.name is None:
+                    segment_template.name = name
                 self.configured.set(name, segment_template, configured=is_configured)
 
 
