@@ -6,6 +6,8 @@ from language_model.llama3.templates import (
     Llama3TemplateTokenizer,
     Llama3TemplateTokenizerConfig,
     Llama3Templates,
+    Text,
+    RoleHeader,
     System,
     User,
     Assistant,

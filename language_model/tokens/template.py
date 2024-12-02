@@ -142,13 +142,19 @@ class Template(metaclass=TemplateMeta):
     def __str__(self):
         template = self.template
         for attr, value in vars(self).items():
-            if isinstance(value, str):
-                template = template.replace(f"<{attr}>", value)
+            if attr in self.__template_slots__:
+                slot = self.__template_slots__.get(attr)
+                if isinstance(value, str):
+                    template = template.replace(f"<{attr}>", slot.prefix+value+slot.suffix)
+                else:
+                    template = template.replace(f"<{attr}>", slot.prefix+f"<{attr}>"+slot.suffix)
         return template
 
+SegmentTemplateT = T.TypeVar('SegmentTemplateT', bound=Template)
+
 @dc.dataclass
-class SegmentTemplate(ez.Config):
-    template: str|Template = None
+class SegmentTemplate(ez.Config, T.Generic[SegmentTemplateT]):
+    template: str|SegmentTemplateT = None
     """A custom dataclass object with a class attribute 'template' that defines a template string, and TokenSlot objects as and_unconfigured for each slot in the template::
 
     @dc.dataclass
@@ -213,6 +219,10 @@ class Templates(ez.MultiConfig[SegmentTemplate]):
                 if segment_template.name is None:
                     segment_template.name = name
                 self.configured.set(name, segment_template, configured=is_configured)
+
+
+TemplateT = T.TypeVar('TemplateT', bound=Template)
+Temp = SegmentTemplate|TemplateT
 
 
 if __name__ == '__main__':

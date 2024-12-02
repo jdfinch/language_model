@@ -5,6 +5,17 @@ import ezpyzy as ez
 import language_model.tokens as tok
 from language_model.tokens import TemplateTokenizer
 
+@dc.dataclass
+class Text(tok.Template):
+    """Raw token sequence without additional formatting."""
+    template = "<content>"
+    content: tok.Slot = tok.Output()
+
+@dc.dataclass
+class RoleHeader(tok.Template):
+    """The prefix of an instruction chat like <|start_header_id|>user<|end_header_id|>\n\n"""
+    template = "<|start_header_id|><role><|end_header_id|>\n\n"
+    role: tok.Slot = tok.Input(trunc=False)
 
 @dc.dataclass
 class System(tok.Template):
@@ -27,6 +38,9 @@ class Assistant(tok.Template):
 
 @dc.dataclass
 class Llama3Templates(tok.Templates):
+    text: tok.SegmentTemplate|Text = Text()
+    role_header: tok.SegmentTemplate|RoleHeader = tok.SegmentTemplate(
+        template=RoleHeader(), trunc_segment=False, trunc_content=False)
     system: tok.SegmentTemplate|System = tok.SegmentTemplate(
         template=System(), trunc_segment=False)
     user: tok.SegmentTemplate|User = tok.SegmentTemplate(
@@ -36,13 +50,13 @@ class Llama3Templates(tok.Templates):
 
 @dc.dataclass
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
-    templates: Llama3Templates = Llama3Templates()
+    templates: tok.Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
     max_length: int = 256
 
 @dc.dataclass
 class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
-    templates: Llama3Templates = Llama3Templates()
+    templates: tok.Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
         repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
     max_length: int = 256

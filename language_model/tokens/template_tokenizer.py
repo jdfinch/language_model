@@ -65,6 +65,8 @@ class TemplateTokenizer(ez.ImplementsConfig, TemplateTokenizerConfig):
                 continue
             template_name = template.name
             template_text = template.template
+            for special_symbol, replacement in self.tokenizer.slot_affix_replacements.items():
+                template_text = template_text.replace(f'{{{special_symbol}}}', replacement)
             slot_pattern = re.compile(
                 f"(?P<slot_lead>{self.tokenizer.slot_lead_pattern})" +
                 r"<(?P<slot_name>[a-zA-Z_][a-zA-Z_0-9]*)>" +
