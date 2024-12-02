@@ -214,12 +214,14 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
 
     def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
-        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
-            samples_trained = 0
-            nlls, nums_tokens = [], []
+        starting_epoch = self.training.current_epoch + 1
+        for self.training.current_epoch in range(1, self.training.epochs+1):
             if self.training.shuffle_data:
                 data = list(data)
                 self.rng.shuffle(data)
+            if self.training.current_epoch < starting_epoch: continue
+            samples_trained = 0
+            nlls, nums_tokens = [], []
             batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
             item_ff = 0
             while item_ff // self.training.batch_size < self.training.current_step:
@@ -247,12 +249,14 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
 
     def train_each_step(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
-        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
-            samples_trained = 0
-            nlls, nums_tokens = [], []
+        starting_epoch = self.training.current_epoch + 1
+        for self.training.current_epoch in range(1, self.training.epochs + 1):
             if self.training.shuffle_data:
                 data = list(data)
                 self.rng.shuffle(data)
+            if self.training.current_epoch < starting_epoch: continue
+            samples_trained = 0
+            nlls, nums_tokens = [], []
             batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
             item_ff = 0
             while item_ff // self.training.batch_size < self.training.current_step:
@@ -281,13 +285,15 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
 
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
-        for self.training.current_epoch in range(self.training.current_epoch+1, self.training.epochs+1):
+        starting_epoch = self.training.current_epoch + 1
+        for self.training.current_epoch in range(1, self.training.epochs + 1):
+            if self.training.shuffle_data:
+                data = list(data)
+                self.rng.shuffle(data)
+            if self.training.current_epoch < starting_epoch: continue
             def train_epoch_each_step(data=data):
                 samples_trained = 0
                 nlls, nums_tokens = [], []
-                if self.training.shuffle_data:
-                    data = list(data)
-                    self.rng.shuffle(data)
                 batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
                 item_ff = 0
                 while item_ff // self.training.batch_size < self.training.current_step:
