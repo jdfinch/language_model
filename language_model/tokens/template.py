@@ -10,6 +10,9 @@ import ezpyzy as ez
 
 from language_model.tokens.tokenizer import Tokenizer
 
+import typing as T
+
+
 
 @dc.dataclass
 class TokenSlot(ez.Config):
@@ -133,7 +136,7 @@ class TemplateMeta(type):
         return super().__new__(cls, name, bases, dct)
 
 class Template(metaclass=TemplateMeta):
-    template: str | Template = None
+    template: T.ClassVar[str | Template] = None
     __template_slots__: dict[str, TokenSlot]
 
     def __str__(self):
