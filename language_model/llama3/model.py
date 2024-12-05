@@ -12,10 +12,9 @@ import math
 from language_model.tokens.template import Template
 from language_model.tokens.token_sequences import TokenSequence, TokenSequences
 from language_model.language_model_config import LanguageModelConfig
-from language_model.lora import LoRA, LoRAs
+from language_model.lora import LoRA
 
 import transformers as hf
-import peft
 import torch as pt
 
 import language_model.llama3.templates as lt
@@ -62,7 +61,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                             self.activate_adapter(name)
                             self.merge_adapter()
                             self.activate_adapter(None)
-            self.activate_adapter(self.adapters.active)
+            self.activate_adapter(self.active_adapter)
 
     def delete(self):
         self.model = None
@@ -76,8 +75,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         path_str = path
         path = pl.Path(path).expanduser()
         path.mkdir(parents=True, exist_ok=True)
-        if self.adapters and self.adapters.active:
-            self.adapters.active_adapter.repo_id = str(path_str)
+        if self.adapter:
+            self.adapter.repo_id = str(path_str)
         self.configured.save(path/'language_model_config.json')
         with ez.shush: self.model.save_pretrained(path)
         if self.training and self.training.optimizer.optimizer:
@@ -85,9 +84,13 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         if self.training and self.training.scheduler.scheduler:
             pt.save(self.training.scheduler.scheduler.state_dict(), path/'scheduler.pt')
 
+    @property
+    def adapter(self) -> LoRA|None:
+        return getattr(self.adapters, self.active_adapter, None)
+
     def activate_adapter(self, name: str | None):
-        self.adapters.active = name
-        if self.adapters.active and self.adapters.active_adapter.trained:
+        self.active_adapter = name
+        if self.active_adapter and self.adapter.trained:
             self.model.set_adapter(name)
         else:
             try: self.model.disable_adapters()
@@ -190,9 +193,9 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             waiting_for_response_index += 1
 
     def start_training(self):
-        if self.adapters.active and not self.adapters.active_adapter.trained:
-            self.model.add_adapter(self.adapters.active_adapter.get_peft_config(), self.adapters.active)
-            self.adapters.active_adapter.trained = True
+        if self.adapter and not self.adapter.trained:
+            self.model.add_adapter(self.adapter.get_peft_config(), self.active_adapter)
+            self.adapter.trained = True
         self.model.train()
         if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
             if self.training.optimizer.optimizer is None         and self.loaded_model_path:
@@ -232,7 +235,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                 num_tokens = tokens['input_ids'].ne(-100).sum().item()
                 nums_tokens.append(num_tokens)
-                loss = self.model(**tokens).loss
+                loss = self.model(**tokens).loss / self.training.gradient_accumulation_steps
                 nll = loss.item()
                 nlls.append(nll)
                 loss.backward()
@@ -267,7 +270,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                 num_tokens = tokens['input_ids'].ne(-100).sum().item()
                 nums_tokens.append(num_tokens)
-                loss = self.model(**tokens).loss
+                loss = self.model(**tokens).loss / self.training.gradient_accumulation_steps
                 nll = loss.item()
                 nlls.append(nll)
                 loss.backward()
@@ -303,7 +306,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                         seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                     num_tokens = tokens['input_ids'].ne(-100).sum().item()
                     nums_tokens.append(num_tokens)
-                    loss = self.model(**tokens).loss
+                    loss = self.model(**tokens).loss / self.training.gradient_accumulation_steps
                     nll = loss.item()
                     nlls.append(nll)
                     loss.backward()

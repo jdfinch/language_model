@@ -1,4 +1,3 @@
-from trl.commands.cli import train
 
 import ezpyzy as ez
 import json

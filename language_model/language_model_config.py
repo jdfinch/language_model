@@ -30,15 +30,16 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """The hardware device to use for training and/or generation, such as 'cuda', 'cuda:7', or 'cpu'."""
     template_tokenizer: tok.TemplateTokenizer = None
     """A Config for the tokenizer and templates to use to format sequences passed to the model."""
-    adapters: lora.LoRAs|None = lora.LoRAs()
+    adapters: ez.MultiConfig[lora.LoRA]|None = ez.MultiConfig(adapter=lora.LoRA())
     """The LoRA adapters to use for the model (set to None for full fine-tuning)."""
+    active_adapter: str|None = 'adapter'
+    """Which LoRA adapter is active for training and inference."""
     training: tr.Training|None = tr.Training()
     """Hyperparameters and configuration for training the model."""
     generation: gen.Generate = gen.Greedy()
     """Hyperparameters and configuration for generating text from the model."""
     random_seed: int|None = None
     """Seed for calls to random number generation, such as shuffling training data."""
-
 
     def __post_init__(self):
         # If base is a path to a model folder, load the config from that folder
@@ -58,7 +59,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
         if isinstance(base_folder, pl.Path):
             adapter_config_path = base_folder / 'adapter_config.json'
             if adapter_config_path.exists():
-                assert self.adapters, \
+                assert self.adapters is not None and self.adapters.adapter is not None, \
                     f"Must have an Adapters config to load an adapter from {adapter_config_path}"
                 adapter_config = json.loads(adapter_config_path.read_text())
                 if self.model_base is None or not self.configured.has.model_base:

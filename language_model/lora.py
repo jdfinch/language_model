@@ -43,18 +43,3 @@ class LoRA(ez.Config):
         return config
 
 
-@dc.dataclass
-class LoRAs(ez.MultiConfig[LoRA]):
-    active: str|None = 'adapter'
-    adapter: LoRA = LoRA()
-
-    @property
-    def active_adapter(self) -> LoRA:
-        return getattr(self, self.active, None)
-
-    @property
-    def number(self):
-        return len([1 for _, lora in self if isinstance(lora, LoRA)])
-
-
-

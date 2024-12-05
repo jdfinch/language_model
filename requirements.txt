@@ -3,8 +3,8 @@
 
 # Python dependencies
 torch==2.3.0+cu118
-torchvision
-torchaudio
+torchvision==0.18.0+cu118
+torchaudio==2.3.0+cu118
 
 # General dependencies
 wheel
@@ -17,3 +17,4 @@ unsloth[huggingface] @ git+https://github.com/unslothai/unsloth.git
 bitsandbytes
 xformers
 triton==2.3.0
+flash-attn==2.6.3
