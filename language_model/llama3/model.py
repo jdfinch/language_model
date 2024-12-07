@@ -1,3 +1,4 @@
+import tqdm
 from transformers import AutoModelForCausalLM
 
 import ezpyzy as ez
@@ -46,7 +47,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         attn = dict(attn_implementation='flash_attention_2') if self.device != 'cpu' else {}
         AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
             **attn, torch_dtype=pt.bfloat16)
-        with ez.shush: model = AutoModelForCausalLM(self.model_base, # noqa
+        model = AutoModelForCausalLM(self.model_base, # noqa
             local_files_only=self.load_locally_saved_models_only,
             load_in_4bit='nf4' == self.quantization,
             load_in_8bit='int8' == self.quantization,
@@ -126,6 +127,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         data_iterator = enumerate(data)
         data_iteration = next(data_iterator, None)
         generation_group_iterator = None
+        progress_total = len(data) if hasattr(data, '__len__') else None
+        progress = tqdm.tqdm(total=progress_total, desc="Generating")
         while data_iteration or generation_groups:
             if data_iteration:
                 i, data_item = data_iteration
@@ -185,12 +188,15 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     setattr(segment, slot.name, response_text)
                 while waiting_for_response_index in response_queue:
                     response = response_queue.pop(waiting_for_response_index)
+                    progress.update(1)
                     yield response
                     waiting_for_response_index += 1
         while waiting_for_response_index in response_queue:
             response = response_queue.pop(waiting_for_response_index)
+            progress.update(1)
             yield response
             waiting_for_response_index += 1
+        progress.close()
 
     def start_training(self):
         if self.adapter and not self.adapter.trained:
@@ -213,10 +219,16 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         if not self.training.resume_previous_training:
             self.training.current_epoch = 0
             self.training.current_step = 0
+        self.training.optimizer.optimizer.zero_grad()
         return self.training.optimizer.optimizer, self.training.scheduler.scheduler
 
     def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
+        if self.training.shuffle_data:
+            data = list(data)
+        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
+            ) * self.training.epochs if hasattr(data, '__len__') else None
+        progress = tqdm.tqdm(total=progress_total, desc='Training')
         starting_epoch = self.training.current_epoch + 1
         for self.training.current_epoch in range(1, self.training.epochs+1):
             if self.training.shuffle_data:
@@ -229,7 +241,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             item_ff = 0
             while item_ff // self.training.batch_size < self.training.current_step:
                 item_ff += len(next(batch_iter))
-            for physical_step, batch in enumerate(batch_iter):
+            for physical_step, batch in enumerate(batch_iter, start=1):
                 tokens = self.template_tokenizer.tokenize(batch).dict(
                     with_labels=True,
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
@@ -240,22 +252,29 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 nlls.append(nll)
                 loss.backward()
                 if physical_step % self.training.gradient_accumulation_steps == 0:
+                    self.training.current_step += 1
                     self.training.optimizer.optimizer.step()
                     self.training.scheduler.scheduler.step()
                     self.training.optimizer.optimizer.zero_grad()
-                    self.training.current_step += 1
+                    progress.update(self.training.batch_size)
                 samples_trained += len(batch)
             epoch_nll, epoch_n_tokens = sum(nll * n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
             ppl = math.exp(epoch_nll / epoch_n_tokens)
             self.training.current_step = 0
             yield ppl
+        self.training.optimizer.optimizer.zero_grad()
+        progress.close()
 
     def train_each_step(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
         starting_epoch = self.training.current_epoch + 1
+        if self.training.shuffle_data:
+            data = list(data)
+        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
+            ) * self.training.epochs if hasattr(data, '__len__') else None
+        progress = tqdm.tqdm(total=progress_total, desc='Training')
         for self.training.current_epoch in range(1, self.training.epochs + 1):
             if self.training.shuffle_data:
-                data = list(data)
                 self.rng.shuffle(data)
             if self.training.current_epoch < starting_epoch: continue
             samples_trained = 0
@@ -264,7 +283,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             item_ff = 0
             while item_ff // self.training.batch_size < self.training.current_step:
                 item_ff += len(next(batch_iter))
-            for physical_step, batch in enumerate(batch_iter):
+            for physical_step, batch in enumerate(batch_iter, start=1):
                 tokens = self.template_tokenizer.tokenize(batch).dict(
                     with_labels=True,
                     seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
@@ -275,23 +294,30 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 nlls.append(nll)
                 loss.backward()
                 if physical_step % self.training.gradient_accumulation_steps == 0:
+                    self.training.current_step += 1
                     self.training.optimizer.optimizer.step()
                     self.training.scheduler.scheduler.step()
                     self.training.optimizer.optimizer.zero_grad()
                     step_nll, step_n_tokens = sum(nll * n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
                     ppl = math.exp(step_nll / step_n_tokens)
                     nlls, nums_tokens = [], []
+                    progress.update(self.training.batch_size)
                     yield ppl
-                    self.training.current_step += 1
                 samples_trained += len(batch)
             self.training.current_step = 0
+        self.training.optimizer.optimizer.zero_grad()
+        progress.close()
 
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
+        if self.training.shuffle_data:
+            data = list(data)
+        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
+            ) * self.training.epochs if hasattr(data, '__len__') else None
+        progress = tqdm.tqdm(total=progress_total, desc='Training')
         starting_epoch = self.training.current_epoch + 1
         for self.training.current_epoch in range(1, self.training.epochs + 1):
             if self.training.shuffle_data:
-                data = list(data)
                 self.rng.shuffle(data)
             if self.training.current_epoch < starting_epoch: continue
             def train_epoch_each_step(data=data):
@@ -301,7 +327,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                 item_ff = 0
                 while item_ff // self.training.batch_size < self.training.current_step:
                     item_ff += len(next(batch_iter))
-                for physical_step, batch in enumerate(batch_iter):
+                for physical_step, batch in enumerate(batch_iter, start=1):
                     tokens = self.template_tokenizer.tokenize(batch).dict(with_labels=True,
                         seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
                     num_tokens = tokens['input_ids'].ne(-100).sum().item()
@@ -311,17 +337,20 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     nlls.append(nll)
                     loss.backward()
                     if physical_step % self.training.gradient_accumulation_steps == 0:
+                        self.training.current_step += 1
                         self.training.optimizer.optimizer.step()
                         self.training.scheduler.scheduler.step()
                         self.training.optimizer.optimizer.zero_grad()
                         step_nll, step_n_tokens = sum(nll*n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
                         ppl = math.exp(step_nll / step_n_tokens)
                         nlls, nums_tokens = [], []
+                        progress.update(self.training.batch_size)
                         yield ppl
-                        self.training.current_step += 1
                     samples_trained += len(batch)
             yield train_epoch_each_step(data=data)
             self.training.current_step = 0
+        self.training.optimizer.optimizer.zero_grad()
+        progress.close()
 
 
 

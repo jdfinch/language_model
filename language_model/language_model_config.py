@@ -38,7 +38,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """Hyperparameters and configuration for training the model."""
     generation: gen.Generate = gen.Greedy()
     """Hyperparameters and configuration for generating text from the model."""
-    random_seed: int|None = None
+    rng_seed: int | None = None
     """Seed for calls to random number generation, such as shuffling training data."""
 
     def __post_init__(self):
@@ -66,6 +66,6 @@ class LanguageModelConfig(ez.ImmutableConfig):
                     self.model_base = adapter_config.get('base_model_name_or_path')
                 if self.adapters.adapter.repo_id is None:
                     self.adapters.adapter.repo_id = str(base_folder)
-        if self.random_seed is None:
-            self.random_seed = rng.randint(1, sys.maxsize)
-        self.rng = rng.Random(self.random_seed)
+        if self.rng_seed is None:
+            self.rng_seed = rng.randint(1, sys.maxsize)
+        self.rng = rng.Random(self.rng_seed)
