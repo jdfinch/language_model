@@ -36,6 +36,7 @@ class Llama3Config(LanguageModelConfig):
 @dc.dataclass
 class Llama3(ez.ImplementsConfig, Llama3Config):
     template_tokenizer: lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
+    show_progress: bool = True
 
     def __post_init__(self):
         super().__post_init__()
@@ -114,7 +115,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         return list(self.each_generation(data))
 
     def each_generation(self,
-        data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str,str]]]
+        data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str, str]]]
     ) -> T.Iterable[str|None]:
         self.model.eval()
         generation_config = self.generation.construct_hf_config()
@@ -128,7 +129,14 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         data_iteration = next(data_iterator, None)
         generation_group_iterator = None
         progress_total = len(data) if hasattr(data, '__len__') else None
-        progress = tqdm.tqdm(total=progress_total, desc="Generating")
+        progress = tqdm.tqdm(total=progress_total, desc="Generating",
+            leave=True, position=0, disable=not self.show_progress)
+        if self.generation.num_kept_examples > 0 and progress_total is not None and progress_total > 0:
+            example_indices = set(self.rng.sample(
+                list(range(progress_total)), min(progress_total, self.generation.num_kept_examples)))
+        else:
+            example_indices = set(range(self.generation.num_kept_examples))
+        self.generation.examples = []
         while data_iteration or generation_groups:
             if data_iteration:
                 i, data_item = data_iteration
@@ -156,7 +164,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             else:
                 generation_group_iteration = next(generation_group_iterator, None)
                 if generation_group_iteration is None:
-                    return
+                    break
                 (max_out, eos_token_id), generation_group = generation_group_iteration
             data_item_indices, data_batch, gen_slot_infos, prompts_tokens = zip(*generation_group)
             tokenized_batch = TokenSequences(prompts_tokens,
@@ -169,6 +177,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             input_length = tokens_batch['input_ids'].shape[1]
             generation_config.eos_token_id = eos_token_id
             generation_config.max_new_tokens = max_out
+            progress.refresh()
             response_batch = self.model.generate(**tokens_batch, generation_config=generation_config)
             for data_item_index, response_tokens, gen_slot_info, data_item in zip(
                 data_item_indices, response_batch, gen_slot_infos, data_batch
@@ -186,6 +195,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
                     segment[slot.name] = response_text
                 else:
                     setattr(segment, slot.name, response_text)
+                if data_item_index in example_indices:
+                    self.generation.examples.append(data_item)
                 while waiting_for_response_index in response_queue:
                     response = response_queue.pop(waiting_for_response_index)
                     progress.update(1)
@@ -222,99 +233,16 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         self.training.optimizer.optimizer.zero_grad()
         return self.training.optimizer.optimizer, self.training.scheduler.scheduler
 
-    def train_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        self.start_training()
-        if self.training.shuffle_data:
-            data = list(data)
-        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
-            ) * self.training.epochs if hasattr(data, '__len__') else None
-        progress = tqdm.tqdm(total=progress_total, desc='Training')
-        starting_epoch = self.training.current_epoch + 1
-        for self.training.current_epoch in range(1, self.training.epochs+1):
-            if self.training.shuffle_data:
-                data = list(data)
-                self.rng.shuffle(data)
-            if self.training.current_epoch < starting_epoch: continue
-            samples_trained = 0
-            nlls, nums_tokens = [], []
-            batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
-            item_ff = 0
-            while item_ff // self.training.batch_size < self.training.current_step:
-                item_ff += len(next(batch_iter))
-            for physical_step, batch in enumerate(batch_iter, start=1):
-                tokens = self.template_tokenizer.tokenize(batch).dict(
-                    with_labels=True,
-                    seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
-                num_tokens = tokens['input_ids'].ne(-100).sum().item()
-                nums_tokens.append(num_tokens)
-                loss = self.model(**tokens).loss / self.training.gradient_accumulation_steps
-                nll = loss.item()
-                nlls.append(nll)
-                loss.backward()
-                if physical_step % self.training.gradient_accumulation_steps == 0:
-                    self.training.current_step += 1
-                    self.training.optimizer.optimizer.step()
-                    self.training.scheduler.scheduler.step()
-                    self.training.optimizer.optimizer.zero_grad()
-                    progress.update(self.training.batch_size)
-                samples_trained += len(batch)
-            epoch_nll, epoch_n_tokens = sum(nll * n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
-            ppl = math.exp(epoch_nll / epoch_n_tokens)
-            self.training.current_step = 0
-            yield ppl
-        self.training.optimizer.optimizer.zero_grad()
-        progress.close()
-
-    def train_each_step(self, data: T.Iterable[list[Template|dict[str,str]]]):
-        self.start_training()
-        starting_epoch = self.training.current_epoch + 1
-        if self.training.shuffle_data:
-            data = list(data)
-        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
-            ) * self.training.epochs if hasattr(data, '__len__') else None
-        progress = tqdm.tqdm(total=progress_total, desc='Training')
-        for self.training.current_epoch in range(1, self.training.epochs + 1):
-            if self.training.shuffle_data:
-                self.rng.shuffle(data)
-            if self.training.current_epoch < starting_epoch: continue
-            samples_trained = 0
-            nlls, nums_tokens = [], []
-            batch_iter = iter(ez.batching(data, size=self.training.physical_batch_size))
-            item_ff = 0
-            while item_ff // self.training.batch_size < self.training.current_step:
-                item_ff += len(next(batch_iter))
-            for physical_step, batch in enumerate(batch_iter, start=1):
-                tokens = self.template_tokenizer.tokenize(batch).dict(
-                    with_labels=True,
-                    seq_type=ft.partial(pt.tensor, dtype=pt.long, device=self.device))
-                num_tokens = tokens['input_ids'].ne(-100).sum().item()
-                nums_tokens.append(num_tokens)
-                loss = self.model(**tokens).loss / self.training.gradient_accumulation_steps
-                nll = loss.item()
-                nlls.append(nll)
-                loss.backward()
-                if physical_step % self.training.gradient_accumulation_steps == 0:
-                    self.training.current_step += 1
-                    self.training.optimizer.optimizer.step()
-                    self.training.scheduler.scheduler.step()
-                    self.training.optimizer.optimizer.zero_grad()
-                    step_nll, step_n_tokens = sum(nll * n for nll, n in zip(nlls, nums_tokens)), sum(nums_tokens)
-                    ppl = math.exp(step_nll / step_n_tokens)
-                    nlls, nums_tokens = [], []
-                    progress.update(self.training.batch_size)
-                    yield ppl
-                samples_trained += len(batch)
-            self.training.current_step = 0
-        self.training.optimizer.optimizer.zero_grad()
-        progress.close()
-
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
         self.start_training()
-        if self.training.shuffle_data:
-            data = list(data)
-        progress_total = (len(data)//self.training.batch_size * self.training.batch_size
-            ) * self.training.epochs if hasattr(data, '__len__') else None
-        progress = tqdm.tqdm(total=progress_total, desc='Training')
+        data = list(data)
+        progress_total = (len(data)//self.training.batch_size * self.training.batch_size) * self.training.epochs
+        progress = tqdm.tqdm(total=progress_total, desc='Training',
+            leave=True, position=0, disable=not self.show_progress)
+        if self.training.num_kept_examples > 0 and progress_total > 0:
+            examples = self.rng.sample(data, min(progress_total, self.training.num_kept_examples))
+            self.training.examples = examples
+        self.generation.examples = []
         starting_epoch = self.training.current_epoch + 1
         for self.training.current_epoch in range(1, self.training.epochs + 1):
             if self.training.shuffle_data:

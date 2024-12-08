@@ -21,11 +21,14 @@ class Generate(ez.Config):
     """If set to a positive int, ngrams of that size cannot be repeated in the output."""
     strategy: str = None
     """The decoding strategy to use for generation."""
+    num_kept_examples: int = 0
+    """The number of examples sent to training runs to be kept in a list."""
 
     def __post_init__(self):
         super().__post_init__()
         if not self.configured.has.strategy:
             self.strategy = get_name_of_subclass(self, Generate)
+        self.examples = []
 
     def construct_hf_config(self) -> hf.GenerationConfig:
         raise TypeError("A subclass of Generate implementing construct_hf_config must be used to specify a generation strategy.")

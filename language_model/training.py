@@ -32,6 +32,8 @@ class Training(ez.Config):
     """The epoch of current training (mostly used for resuming training)"""
     current_step: int = 0
     """The current step of training the current epoch (mostly used for resuming training)"""
+    num_kept_examples: int = 0
+    """The number of examples sent to training runs to be kept in a list."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -71,6 +73,7 @@ class Training(ez.Config):
             elif self.configured.has.gradient_accumulation_steps:
                 self._batch_size = self.gradient_accumulation_steps
                 self._physical_batch_size = 1
+        self.examples = []
 
 
     def _set_batch_size(self, value):
