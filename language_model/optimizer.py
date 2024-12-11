@@ -74,7 +74,7 @@ class Adam(Optimizer):
     """The epsilon value prevents division by zero in the optimizer."""
     weight_decay: float = 0.0
     """The weight decay value for the optimizer."""
-    quantization: str|None = None
+    quantization: str|None = '8bit'
     """The quantization scheme to use for the optimizer, either None or '8bit'."""
 
     def optimize(self, model: ModelWithTrainableParameters):

@@ -72,7 +72,7 @@ class HuggingfaceTokenizer(ez.ImplementsConfig, HuggingfaceTokenizerConfig):
 
 if __name__ == '__main__':
 
-    llama3tokenzier = HuggingfaceTokenizer(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    llama3tokenzier = HuggingfaceTokenizer(repo_id='meta-llama/Llama-3.1-8B-Instruct')
     encoded = llama3tokenzier.encode("Hello, this is a test!")
     print(encoded)
     for token in encoded:

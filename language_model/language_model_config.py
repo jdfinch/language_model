@@ -20,7 +20,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """Configuration for a language model"""
     model_to_load: str | None = None
     """Path to a custom model to load. The base will be used instead if this is None."""
-    model_base: str | None = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    model_base: str | None = "meta-llama/Llama-3.2-1B-Instruct"
     """The base model repository ID. If no model_to_load is specified, the base will be loaded from this ID."""
     quantization: str | None = 'nf4'
     """Quantization mode to use. If None, no quantization will be used (half-precision)."""

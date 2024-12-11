@@ -51,14 +51,14 @@ class Llama3Templates(tok.Templates):
 @dc.dataclass
 class Llama3TemplateTokenizerConfig(tok.TemplateTokenizerConfig):
     templates: tok.Templates = Llama3Templates()
-    tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    tokenizer: tok.HuggingfaceTokenizerConfig = tok.HuggingfaceTokenizerConfig(repo_id='meta-llama/Llama-3.1-8B-Instruct')
     max_length: int = 256
 
 @dc.dataclass
 class Llama3TemplateTokenizer(TemplateTokenizer, ez.ImplementsConfig, Llama3TemplateTokenizerConfig):
     templates: tok.Templates = Llama3Templates()
     tokenizer: tok.HuggingfaceTokenizer = tok.HuggingfaceTokenizerConfig(
-        repo_id='meta-llama/Meta-Llama-3.1-8B-Instruct')
+        repo_id='meta-llama/Llama-3.1-8B-Instruct')
     max_length: int = 256
 
 if __name__ == '__main__':

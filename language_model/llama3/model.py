@@ -241,7 +241,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             leave=True, position=0, disable=not self.show_progress)
         if self.training.num_kept_examples > 0 and progress_total > 0:
             examples = self.rng.sample(data, min(progress_total, self.training.num_kept_examples))
-            self.training.examples = examples
+            self.training.examples = [self.template_tokenizer.tokenize(example).text() for example in examples]
         self.generation.examples = []
         starting_epoch = self.training.current_epoch + 1
         for self.training.current_epoch in range(1, self.training.epochs + 1):
