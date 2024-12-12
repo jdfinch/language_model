@@ -37,7 +37,7 @@ class Training(ez.Config):
 
     def __post_init__(self):
         super().__post_init__()
-        with self.configured.not_configuring():
+        with self.configured.configuring():
             if self.configured.has.batch_size and self.configured.has.physical_batch_size:
                 assert self.batch_size % self.physical_batch_size == 0, \
                     "batch_size must be divisible by physical_batch_size"
@@ -151,3 +151,5 @@ if __name__ == '__main__':
 
     training = Training(batch_size=64, physical_batch_size=16)
     print(training.configured.json())
+
+    print(training.configured.configured)
