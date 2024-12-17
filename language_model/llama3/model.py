@@ -47,7 +47,7 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         attn = dict(attn_implementation='flash_attention_2') if self.flash_attention and self.device != 'cpu' else {}
         AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
             **attn, torch_dtype=pt.bfloat16)
-        if self.quantization.startswith('nf4'):
+        if self.quantization and self.quantization.startswith('nf4'):
             quant_args = dict(quantization_config=hf.BitsAndBytesConfig(
                 load_in_4bit=True, bnb_4bit_quant_type='nf4',
                 bnb_4bit_use_double_quant=self.quantization.endswith('dq'),
@@ -61,15 +61,14 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             **quant_args, torch_dtype=pt.bfloat16, device_map={'': self.device})
         self.model: hf.LlamaForCausalLM = model # noqa
         if self.adapters:
-            for name, adapter in self.adapters:
-                if isinstance(adapter, LoRA):
-                    if adapter.trained:
-                        self.model.load_adapter(adapter.repo_id, adapter_name=name, device_map=self.device)
-                        if adapter.lora_merge_on_load:
-                            self.activate_adapter(name)
-                            self.merge_adapter()
-                            self.activate_adapter(None)
-            self.activate_adapter(self.active_adapter)
+            for name, adapter in self.adapters.items():
+                if adapter.trained:
+                    self.model.load_adapter(adapter.repo_id, adapter_name=name, device_map=self.device)
+                    if adapter.lora_merge_on_load:
+                        self.activate_adapter(name)
+                        self.bake_adapter()
+                        self.activate_adapter(None)
+            self.activate_adapter(self.active_adapter_name)
 
     def delete(self):
         self.model = None
@@ -83,8 +82,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         path_str = path
         path = pl.Path(path).expanduser()
         path.mkdir(parents=True, exist_ok=True)
-        if self.adapter:
-            self.adapter.repo_id = str(path_str)
+        if self.active_adapter:
+            self.active_adapter.repo_id = str(path_str)
         self.configured.save(path/'language_model_config.json')
         with ez.shush: self.model.save_pretrained(path)
         if self.training and self.training.optimizer.optimizer:
@@ -93,12 +92,19 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             pt.save(self.training.scheduler.scheduler.state_dict(), path/'scheduler.pt')
 
     @property
-    def adapter(self) -> LoRA|None:
-        return getattr(self.adapters, self.active_adapter, None)
+    def adapters(self) -> dict[str, LoRA]:
+        return {adapter_name: adapter for adapter_name, adapter in self if isinstance(adapter, LoRA)}
+
+    @property
+    def active_adapter(self) -> LoRA|None:
+        if self.active_adapter_name is None:
+            return None
+        else:
+            return getattr(self, self.active_adapter_name, None)
 
     def activate_adapter(self, name: str | None):
-        self.active_adapter = name
-        if self.active_adapter and self.adapter.trained:
+        self.active_adapter_name = name
+        if self.active_adapter and self.active_adapter.trained:
             self.model.set_adapter(name)
         else:
             try: self.model.disable_adapters()
@@ -107,12 +113,12 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
     def deactivate_adapter(self):
         self.activate_adapter(None)
 
-    def merge_adapter(self):
+    def bake_adapter(self):
         raise NotImplementedError
 
-    def unmerge_adapter(self):
-        assert getattr(self.adapters, self.adapters.active).repo_id is not None, \
-            f"Unmerging adapter {self.adapters.active} requires re-loading the adapter and the base model separately, but the this active adapter does not have a repo_id field. Save the adapter to disk before calling unmerge_adapter() so it can be re-loaded from its repo_id path."
+    def unbake_adapter(self):
+        assert self.active_adapter.repo_id is not None, \
+            f"Unmerging adapter {self.active_adapter} requires re-loading the adapter and the base model separately, but the this active adapter does not have a repo_id field. Save the adapter to disk before calling unmerge_adapter() so it can be re-loaded from its repo_id path."
         raise NotImplementedError
 
     def generate(self,
@@ -218,9 +224,9 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         progress.close()
 
     def start_training(self):
-        if self.adapter and not self.adapter.trained:
-            self.model.add_adapter(self.adapter.get_peft_config(), self.active_adapter)
-            self.adapter.trained = True
+        if self.active_adapter and not self.active_adapter.trained:
+            self.model.add_adapter(self.active_adapter.get_peft_config(), self.active_adapter_name)
+            self.active_adapter.trained = True
         self.model.train()
         if self.training.optimizer.optimizer is None or not self.training.resume_previous_training:
             if self.training.optimizer.optimizer is None         and self.loaded_model_path:
