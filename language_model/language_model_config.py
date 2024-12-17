@@ -22,7 +22,7 @@ class LanguageModelConfig(ez.ImmutableConfig):
     """Path to a custom model to load. The base will be used instead if this is None."""
     model_base: str | None = "meta-llama/Llama-3.2-1B-Instruct"
     """The base model repository ID. If no model_to_load is specified, the base will be loaded from this ID."""
-    quantization: str | None = 'nf4'
+    quantization: str | None = 'nf4dq'
     """Quantization mode to use. If None, no quantization will be used (half-precision)."""
     load_locally_saved_models_only: bool = False
     """Whether to load models only from the local cache, not from the Hugging Face model hub."""

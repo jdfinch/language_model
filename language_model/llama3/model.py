@@ -27,15 +27,14 @@ import typing as T
 class Llama3Config(LanguageModelConfig):
     model_base: str = "meta-llama/Llama-3.2-1B-Instruct"
     template_tokenizer: lt.Llama3TemplateTokenizerConfig = lt.Llama3TemplateTokenizerConfig()
+    flash_attention: bool = True
 
     def __post_init__(self):
         super().__post_init__()
-        if self.generation and self.training and not self.generation.configured.has.batch_size:
-            self.generation.batch_size = self.training.physical_batch_size
 
 @dc.dataclass
 class Llama3(ez.ImplementsConfig, Llama3Config):
-    template_tokenizer: lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
+    template_tokenizer: lt.Llama3TemplateTokenizerConfig|lt.Llama3TemplateTokenizer = lt.Llama3TemplateTokenizerConfig()
     show_progress: bool = True
 
     def __post_init__(self):
@@ -45,14 +44,21 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
     def reload_model(self):
         assert isinstance(self.model_base, str), \
             "The base model repository ID must be a string."
-        attn = dict(attn_implementation='flash_attention_2') if self.device != 'cpu' else {}
+        attn = dict(attn_implementation='flash_attention_2') if self.flash_attention and self.device != 'cpu' else {}
         AutoModelForCausalLM = ft.partial(hf.AutoModelForCausalLM.from_pretrained,
             **attn, torch_dtype=pt.bfloat16)
+        if self.quantization.startswith('nf4'):
+            quant_args = dict(quantization_config=hf.BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type='nf4',
+                bnb_4bit_use_double_quant=self.quantization.endswith('dq'),
+                bnb_4bit_compute_dtype=pt.bfloat16))
+        elif self.quantization == 'int8':
+            quant_args = dict(load_in_8bit=True)
+        else:
+            quant_args = {}
         model = AutoModelForCausalLM(self.model_base, # noqa
             local_files_only=self.load_locally_saved_models_only,
-            load_in_4bit='nf4' == self.quantization,
-            load_in_8bit='int8' == self.quantization,
-            device_map={'': self.device})
+            **quant_args, torch_dtype=pt.bfloat16, device_map={'': self.device})
         self.model: hf.LlamaForCausalLM = model # noqa
         if self.adapters:
             for name, adapter in self.adapters:
@@ -118,6 +124,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
         data: list[Template | dict[str,str]] | T.Iterable[list[Template | dict[str, str]]]
     ) -> T.Iterable[str|None]:
         self.model.eval()
+        if self.model.is_gradient_checkpointing:
+            self.model.gradient_checkpointing_disable()
         generation_config = self.generation.construct_hf_config()
         generation_config.pad_token_id = self.template_tokenizer.tokenizer.pad_token_id
         if isinstance(data, list) and data and isinstance(data[0], (dict, Template)):
@@ -231,6 +239,8 @@ class Llama3(ez.ImplementsConfig, Llama3Config):
             self.training.current_epoch = 0
             self.training.current_step = 0
         self.training.optimizer.optimizer.zero_grad()
+        if self.training.gradient_checkpointing:
+            self.model.gradient_checkpointing_enable()
         return self.training.optimizer.optimizer, self.training.scheduler.scheduler
 
     def train_each_step_each_epoch(self, data: T.Iterable[list[Template|dict[str,str]]]):
